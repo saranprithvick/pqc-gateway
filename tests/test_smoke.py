@@ -5,8 +5,6 @@ Run with: make smoke
 On failure: stop and report before proceeding to any other milestone.
 """
 import json
-import platform
-import sys
 from pathlib import Path
 
 
@@ -66,50 +64,32 @@ def test_python_can_import():
 
 
 def test_record_versions(capsys):
-    """Print version table and write results/raw/smoke_versions.json."""
-    import importlib.metadata
+    """Print version table and write results/raw/smoke_versions.json using shared env_metadata."""
     import oqs
-    import oqs.oqs as _oqs_inner
-    import can
-    import cryptography
+    from pqcgw import env_metadata
 
     kems = oqs.get_enabled_kem_mechanisms()
     sigs = oqs.get_enabled_sig_mechanisms()
 
-    liboqs_python_ver = importlib.metadata.version("liboqs-python")
-    liboqs_dylib_path = getattr(_oqs_inner, "_liboqs", None)
-    dylib_path = liboqs_dylib_path._name if liboqs_dylib_path else "unknown"
+    meta = env_metadata.collect()
+    record = {**meta, "kem_count": len(kems), "sig_count": len(sigs),
+              "kem_mechanisms": kems, "sig_mechanisms": sigs}
 
-    record = {
-        "python": sys.version,
-        "os": platform.platform(),
-        "cpu": platform.processor() or platform.machine(),
-        "liboqs": oqs.oqs_version(),
-        "liboqs_python": liboqs_python_ver,
-        "liboqs_dylib_path": dylib_path,
-        "cryptography": cryptography.__version__,
-        "python_can": can.__version__,
-        "kem_count": len(kems),
-        "sig_count": len(sigs),
-        "kem_mechanisms": kems,
-        "sig_mechanisms": sigs,
-    }
-
-    # Write JSON record (excluded from git via .gitignore pattern; small so committed is fine)
     out_path = _results_dir() / "smoke_versions.json"
     out_path.write_text(json.dumps(record, indent=2))
 
-    # Print summary table to stdout (visible with pytest -v or -s)
     print("\n" + "=" * 60)
     print("  PQC Gateway — M0 smoke test version summary")
     print("=" * 60)
-    print(f"  Python     : {sys.version.split()[0]}")
-    print(f"  OS/CPU     : {platform.platform()} / {record['cpu']}")
-    print(f"  liboqs     : {record['liboqs']}")
-    print(f"  liboqs-py  : {record['liboqs_python']}")
-    print(f"  dylib path : {record['liboqs_dylib_path']}")
-    print(f"  cryptography: {record['cryptography']}")
-    print(f"  python-can : {record['python_can']}")
+    print(f"  Python     : {meta['python'].split()[0]}")
+    print(f"  OS/CPU     : {meta['os']} / {meta['cpu']}")
+    print(f"  liboqs     : {meta['liboqs']}")
+    print(f"  liboqs-py  : {meta['liboqs_python']}")
+    print(f"  dylib path : {meta['liboqs_dylib']}")
+    print(f"  liboqs bld : {meta['liboqs_build']}")
+    print(f"  cryptography: {meta['cryptography']}")
+    print(f"  python-can : {meta['python_can']}")
+    print(f"  git commit : {meta['git_commit']}")
     print(f"  KEMs ({len(kems):3d}) : {', '.join(kems)}")
     print(f"  SIGs ({len(sigs):3d}) : {', '.join(sigs)}")
     print("=" * 60)

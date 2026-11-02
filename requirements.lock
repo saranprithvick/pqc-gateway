@@ -1,3 +1,11 @@
+# liboqs C library (NOT a pip package — built from source into .oqs/)
+#   git tag:    0.16.0
+#   git commit: 5a1a854
+#   cmake:      -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release
+#               -DOQS_BUILD_ONLY_LIB=ON -DOQS_DIST_BUILD=ON
+#   prefix:     $PWD/.oqs
+#   loaded via: OQS_INSTALL_PATH exported by Makefile
+#
 cffi==2.1.1
 contourpy==1.4.0
 cryptography==50.0.2
@@ -13,7 +21,7 @@ packaging==26.3
 pandas==3.1.0
 pillow==13.0.0
 pluggy==1.7.0
--e git+https://github.com/saranprithvick/pqc-gateway.git@bd4545a06ca285eb936ead959536d8742096dfe2#egg=pqcgw
+-e git+https://github.com/saranprithvick/pqc-gateway.git@e1ff8e9689b0dab7e3bebd2d9bf72fe8b17b046d#egg=pqcgw
 pycparser==3.12
 Pygments==2.21.0
 pyparsing==3.3.3
