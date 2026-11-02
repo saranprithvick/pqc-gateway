@@ -25,7 +25,18 @@
 
 ## Open issues
 
-None.
+**OI-1 (M1): Validate lengths before calling liboqs.**
+Every crypto wrapper (KEM, Signature) must check that public key, ciphertext, and signature byte-lengths match the values reported by the algorithm before passing buffers to liboqs. A short or empty input must raise a clear error, never reach the C library. Add a regression test that a short/empty public key is rejected at the wrapper layer (not inside liboqs), so a future liboqs version that adds its own check does not mask the regression. Prompted by GHSA-w696-4vrr-x6x3, which showed earlier liboqs silently zero-padded short inputs.
+
+**OI-2 (M1): SLH-DSA-PURE-SHA2-128f sizes for the M1 size assertions.**
+liboqs 0.16.0 exposes this algorithm as `SLH_DSA_PURE_SHA2_128F` (underscores). Use the PURE variant, not a PREHASH variant.
+- Public key: 32 B
+- Secret key: 64 B
+- Signature: 17088 B
+The M1 size-assertion test must check these values at runtime against `kem.length_public_key` / `sig.length_signature` etc. and stop with a clear error if the installed library disagrees.
+
+**OI-3 (M0, known): liboqs dylib not project-local.**
+The loaded library is `/Users/saranmacbook/_oqs/lib/liboqs.dylib` — a pre-existing source build at `~/_oqs/`, not `$PWD/.oqs/`. It is not a system install, but it is not reproduced by `make setup`. The liboqs-python PyPI wheel is pure-Python and links against whatever liboqs it finds on the search path. Consequence: a second developer cloning this repo and running `make setup` would need the same `~/_oqs/` build or an equivalent one. Recorded as a known limitation. If portability becomes a concern, switch to a project-local source build (`OQS_INSTALL_PATH=$PWD/.oqs`) in a future session.
 
 ## Next step
 

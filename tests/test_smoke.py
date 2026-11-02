@@ -67,19 +67,26 @@ def test_python_can_import():
 
 def test_record_versions(capsys):
     """Print version table and write results/raw/smoke_versions.json."""
+    import importlib.metadata
     import oqs
+    import oqs.oqs as _oqs_inner
     import can
     import cryptography
 
     kems = oqs.get_enabled_kem_mechanisms()
     sigs = oqs.get_enabled_sig_mechanisms()
 
+    liboqs_python_ver = importlib.metadata.version("liboqs-python")
+    liboqs_dylib_path = getattr(_oqs_inner, "_liboqs", None)
+    dylib_path = liboqs_dylib_path._name if liboqs_dylib_path else "unknown"
+
     record = {
         "python": sys.version,
         "os": platform.platform(),
         "cpu": platform.processor() or platform.machine(),
         "liboqs": oqs.oqs_version(),
-        "liboqs_python": oqs.__version__ if hasattr(oqs, "__version__") else "unknown",
+        "liboqs_python": liboqs_python_ver,
+        "liboqs_dylib_path": dylib_path,
         "cryptography": cryptography.__version__,
         "python_can": can.__version__,
         "kem_count": len(kems),
@@ -100,6 +107,7 @@ def test_record_versions(capsys):
     print(f"  OS/CPU     : {platform.platform()} / {record['cpu']}")
     print(f"  liboqs     : {record['liboqs']}")
     print(f"  liboqs-py  : {record['liboqs_python']}")
+    print(f"  dylib path : {record['liboqs_dylib_path']}")
     print(f"  cryptography: {record['cryptography']}")
     print(f"  python-can : {record['python_can']}")
     print(f"  KEMs ({len(kems):3d}) : {', '.join(kems)}")
