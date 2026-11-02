@@ -4,7 +4,7 @@
 
 | ID | Status | Notes |
 |----|--------|-------|
-| M0 | IN PROGRESS | Skeleton created; awaiting `make setup && make smoke` from human |
+| M0 | DONE | All 6 smoke tests pass. liboqs 0.16.0, Python 3.13.2, arm64. |
 | M1 | Not started | |
 | M2 | Not started | |
 | M3 | Not started | |
@@ -29,13 +29,7 @@ None.
 
 ## Next step
 
-Human runs:
-```
-make setup
-make smoke
-```
-If smoke test fails on liboqs import → stop and report before any M1 work.
-If ML-KEM-768 or ML-DSA-65 missing from enabled mechanisms → stop and report.
+M0 complete. Await human approval to merge `m0-setup` → `main`, then start M1 (crypto abstraction layer).
 
 ## CLAUDE.md §15 conflicts noted
 

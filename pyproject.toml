@@ -1,13 +1,13 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "pqcgw"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "liboqs",
+    "liboqs-python",
     "cryptography",
     "python-can",
     "pandas",
