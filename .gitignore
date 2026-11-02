@@ -1,0 +1,28 @@
+# Virtual environment
+.venv/
+
+# liboqs local build
+.oqs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Environment / secrets
+.env
+configs/keys/*.pem
+configs/keys/*.key
+configs/keys/*.pub
+
+# Large result files (commit only small tables)
+results/raw/*.csv
+results/raw/*.json
+
+# macOS
+.DS_Store

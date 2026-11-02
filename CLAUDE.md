@@ -331,10 +331,10 @@ pqc-gateway/
 - No SUMO/Veins, no Raspberry Pi, no PKI.
 
 ## 14. Commands (maintained by Claude Code; fill in during M0, keep accurate)
-- Setup: _to be filled in M0_
-- Run tests: _to be filled in M0_
-- Run security tests only: _to be filled in M0_
-- Run benchmarks / agility matrix: _to be filled in M0_
+- Setup: `make setup`  (creates `.venv`, installs all deps, writes `requirements.lock`)
+- Run tests: `make test`
+- Run security tests only: `.venv/bin/pytest tests/security/ -v`
+- Run benchmarks / agility matrix: `python scripts/run_matrix.py` *(completed in M7)*
 
 ## 15. Resolved decisions (from the M0 review; these take precedence over earlier sections where they conflict)
 1. **Where code runs:** on the student's own machine via terminal Claude Code. All benchmark and result files must come from there, never from a cloud sandbox.
