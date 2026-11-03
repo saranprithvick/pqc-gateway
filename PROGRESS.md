@@ -5,7 +5,7 @@
 | ID | Status | Notes |
 |----|--------|-------|
 | M0 | DONE | All 6 smoke tests pass. liboqs 0.16.0, Python 3.13.2, arm64. |
-| M1 | Not started | |
+| M1 | DONE | 51 unit tests pass (sizes, round-trips, OI-1, hybrid, registry, suite loading). Branch m1-crypto-layer. |
 | M2 | Not started | |
 | M3 | Not started | |
 | M4 | Not started | |
@@ -52,7 +52,7 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M0 complete. Await human approval to merge `m0-setup` → `main`, then start M1 (crypto abstraction layer).
+M1 complete. Await human approval to merge `m1-crypto-layer` → `main`, then start M2 (handshake state machines, transcript, key schedule).
 
 ## CLAUDE.md §15 conflicts noted
 

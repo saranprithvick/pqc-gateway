@@ -1,0 +1,6 @@
+suite_id = 2
+name = "pqc"
+kem = ["ml-kem-768"]
+signature = ["ml-dsa-65"]
+kdf = "hkdf-sha256"
+aead = "aes-256-gcm"
