@@ -6,7 +6,7 @@
 |----|--------|-------|
 | M0 | DONE | All 6 smoke tests pass. liboqs 0.16.0, Python 3.13.2, arm64. |
 | M1 | DONE | 51 unit tests pass (sizes, round-trips, OI-1, hybrid, registry, suite loading). Branch m1-crypto-layer. |
-| M2 | Not started | |
+| M2 | DONE | 28 new tests pass (18 unit + 10 security: T4, T5, T6, T13). Branch m2-handshake. |
 | M3 | Not started | |
 | M4 | Not started | |
 | M5 | Not started | |
@@ -52,7 +52,7 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M1 complete. Await human approval to merge `m1-crypto-layer` → `main`, then start M2 (handshake state machines, transcript, key schedule).
+M2 complete. Await human approval to merge `m2-handshake` → `main`, then start M3 (record layer, nonce, replay window).
 
 ## CLAUDE.md §15 conflicts noted
 
