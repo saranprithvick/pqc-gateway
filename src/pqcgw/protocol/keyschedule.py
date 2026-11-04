@@ -34,8 +34,9 @@ class SessionKeys:
     salt_i2r: bytes    # 4-byte nonce prefix, i2r
     salt_r2i: bytes    # 4-byte nonce prefix, r2i
     k_finished: bytes  # 32-byte key for FINISHED HMAC
-    rekey_sec0: bytes  # 32-byte seed for the light-rekey ratchet (epoch 0)
+    rekey_sec0: bytes  # current ratchet secret; updated each light rekey
     suite_id: int
+    th: bytes          # original handshake transcript hash; fixed for session lifetime
     epoch: int = 0
 
 
@@ -99,5 +100,6 @@ def derive_session_keys(
         k_finished=expand("finished", 32),
         rekey_sec0=expand("rekey0", 32),
         suite_id=sid,
+        th=th,
         epoch=epoch,
     )
