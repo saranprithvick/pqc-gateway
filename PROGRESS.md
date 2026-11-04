@@ -52,7 +52,24 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M4 complete. Await human approval to merge `m4-rekey` → `main`, then start M5 (python-can virtual bus, LegacyNode, CanAdapter, Gateway, ModernPeer, LinkEmulator, C0 passthrough; T12 documented).
+Await human approval on the pre-M5 verification findings (see OI-4 through OI-8 below), fix approved items on a patch branch, then start M5 (python-can virtual bus, LegacyNode, CanAdapter, Gateway, ModernPeer, LinkEmulator, C0 passthrough; T12 documented).
+
+## Open issues (pre-M5 verification, 2026-11-04)
+
+**OI-4: Counter-limit path drops DATA frame silently (session.py:seal()).**
+When `seal(plaintext)` triggers the counter hard-limit, it calls `initiate_light_rekey()` and returns REKEY_REQ bytes. The original DATA plaintext is discarded — no buffer, no drop counter, no log warning. Awaiting approval to: increment a `_dropped_frames` counter and log a warning (minimum), or return the dropped plaintext alongside the REKEY_REQ record (cleaner for Gateway integration in M5).
+
+**OI-5: Duplicate REKEY_REQ check does not expire with grace period (session.py:open()).**
+The raw-bytes duplicate check runs before grace-period routing and has no state guard. A byte-identical REKEY_REQ will resend the stale cached ACK even after grace expires, indefinitely. The spec (§15 item 21) restricts this to "during the grace period". Also missing: a test asserting the duplicate is rejected after grace ends. Awaiting approval to: gate the duplicate path on `_rekey_state in (ACK_SENT, GRACE)` and add the missing (c) test.
+
+**OI-6: No config-load check that retry budget < grace period (session.py:RekeyConfig).**
+`rekey_timeout_s × (rekey_max_retries + 1)` should be strictly less than `grace_period_s`. With defaults (0.5 × 4 = 2.0 s = grace_period_s) the budget exactly equals the grace window. Awaiting approval to: add `__post_init__` validator on `RekeyConfig`.
+
+**OI-7: keyschedule.py imports from crypto/providers/ — layer violation.**
+`keyschedule.py:25` imports `HkdfSha256, HkdfSha384` from `pqcgw.crypto.providers.kdf_hkdf` for `suite_hash()`. Awaiting approval to: add a `hash_name: str` property to the `KDF` interface and each provider, remove the providers import from protocol/.
+
+**OI-8: T9 does not span rekeys; README must list six limitations verbatim (M8).**
+T9 covers 100,000 records on epoch 0 only. It does not verify (epoch-0 key, nonce) ≠ (epoch-1 key, nonce) across a ratchet boundary. Awaiting approval to add `test_t9_nonce_uniqueness_spans_rekeys`. Separately: README must list CLAUDE.md §1 six limitations verbatim — flag for M8 so it isn't missed.
 
 ## CLAUDE.md §15 conflicts noted
 
