@@ -68,6 +68,10 @@ class RekeyConfig:
 
     counter_hard_limit: int = 2 ** 32
     max_consecutive_auth_failures: int = 10
+    # grace_period_s: seconds after epoch switch before old-epoch records are rejected.
+    # 0.0 = no grace period (test-only sentinel): old-epoch records are rejected
+    # immediately; a lost REKEY_ACK closes the session via AlertError.
+    # Validator check is skipped when grace_period_s == 0.0.
     grace_period_s: float = 2.0
     grace_period_records: int = 64
     rekey_timeout_ms: int = 400   # fixed per retry, no backoff (§15 item 21 / OI-6)
@@ -179,6 +183,9 @@ class SessionManager:
         # Consecutive auth-failure counter
         self._auth_failures: int = 0
 
+        # Closed flag: set to True on AlertError; subsequent seal/open raise SessionError
+        self._closed: bool = False
+
         # Outbound message queue (control messages queued by open())
         self._outbound_queue: list[bytes] = []
 
@@ -189,6 +196,11 @@ class SessionManager:
     @property
     def epoch(self) -> int:
         return self._rl_current._keys.epoch
+
+    @property
+    def closed(self) -> bool:
+        """True after a fatal AlertError; subsequent seal/open raise SessionError."""
+        return self._closed
 
     @property
     def rekey_state(self) -> RekeyState:
@@ -213,9 +225,13 @@ class SessionManager:
 
         Raises AlertError if epoch == 255 (full rekey required), or if a rekey was
         already in progress and timed out.
+        Raises SessionError if the session has been closed by a prior AlertError.
         """
+        if self._closed:
+            raise SessionError("session is closed")
         # Epoch 255 guard: full rekey must be done before wrapping (§5.7)
         if self._rl_current._keys.epoch >= 255:
+            self._close()
             raise AlertError("epoch limit reached; full rekey required before epoch 255")
 
         # Check for a pending rekey timeout before sealing data
@@ -226,10 +242,12 @@ class SessionManager:
         current_counter = self._rl_current._counters[direction]
         if current_counter >= self._config.counter_hard_limit:
             if self._role != SessionRole.INITIATOR:
+                self._close()
                 raise AlertError("counter hard limit reached on responder; initiator must trigger rekey")
             if self._rekey_state == RekeyState.REQ_SENT:
                 # Rekey already in progress; check timeout
                 self.check_rekey_timeout()
+                self._close()
                 raise AlertError("counter hard limit reached and rekey did not complete")
             log.info("Counter hard limit %d reached; triggering light rekey", self._config.counter_hard_limit)
             req = self.initiate_light_rekey()
@@ -258,7 +276,10 @@ class SessionManager:
 
         Raises RecordError on authentication/epoch/replay failure (drop silently on wire).
         Raises AlertError on too many consecutive auth failures.
+        Raises SessionError if the session has been closed by a prior AlertError.
         """
+        if self._closed:
+            raise SessionError("session is closed")
         if len(data) < _HEADER_LEN:
             raise RecordError("Record too short")
 
@@ -321,6 +342,7 @@ class SessionManager:
         if self._role != SessionRole.INITIATOR:
             raise SessionError("only the initiator may initiate a light rekey")
         if self._rl_current._keys.epoch >= 255:
+            self._close()
             raise AlertError("epoch limit reached; use full rekey")
 
         # Derive next-epoch keys but do NOT switch yet
@@ -345,6 +367,7 @@ class SessionManager:
         if elapsed >= self._config.rekey_timeout_ms / 1000:
             if self._rekey_retries >= self._config.rekey_max_retries:
                 self._rekey_state = RekeyState.IDLE
+                self._close()
                 raise AlertError(
                     f"rekey timed out after {self._rekey_retries} retries; closing session"
                 )
@@ -479,10 +502,16 @@ class SessionManager:
         if self._rekey_state in (RekeyState.GRACE, RekeyState.ACK_SENT):
             self._rekey_state = RekeyState.IDLE
 
+    def _close(self) -> None:
+        """Mark the session permanently closed; subsequent seal/open raise SessionError."""
+        self._closed = True
+        log.info("Session closed (session_id=%s)", self._session_id.hex())
+
     def _on_auth_failure(self) -> None:
         self._auth_failures += 1
         if self._auth_failures >= self._config.max_consecutive_auth_failures:
             self._auth_failures = 0
+            self._close()
             raise AlertError(
                 f"too many consecutive authentication failures "
                 f"({self._config.max_consecutive_auth_failures})"

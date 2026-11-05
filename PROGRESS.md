@@ -74,12 +74,18 @@ Added `hash_name: str` abstract property to `KDF` interface (`interfaces.py`) an
 **OI-8 (M8 flag): README must list CLAUDE.md §1 six limitations verbatim.**
 Flag for M8: README must include the six Known Limitations from §1 verbatim (unauthenticated CAN side; relative results; custom unverified protocol; limited agility; FN-DSA/HQC experimental; link emulation not wireless).
 
-## Full test count after m4-fixes
+## M5 requirements (pre-merge notes added 2026-11-05)
 
-158 tests pass (was 137 before fixes):
+1. **CounterExhausted buffer (§15 item 20):** Gateway must catch `CounterExhausted` from `SessionManager.seal()`, buffer the unsent frame in a bounded queue (default 64, drop-oldest with a drop counter), flush the queue once the new epoch is active, and discard + count buffered frames as lost if the rekey fails with `AlertError`.
+
+2. **T9 across full rekey (OI-8 deferred):** `test_t9_rekey_spans.py` currently spans light rekeys only (epochs 0→1→2). M5 wires up `SessionManager.promote_full_rekey()`; at that point extend T9 to verify (key, nonce) uniqueness across a full-rekey boundary (new session_id).
+
+## Full test count after pre-merge verification
+
+164 tests pass (was 137 after M4):
 - 14 security (T1–T3, T7, T9, T11) + 10 security (T4–T6, T13) + 9 security (T8, T10) + 2 security (T9 rekey span) = 35 security
-- 51 unit (crypto interfaces) + 18 unit (handshake) + 21 unit (OI regressions) + 19 unit (record) + 10 unit (rekey) + 6 smoke = 125 non-security
-- Total: 158
+- 51 unit (crypto interfaces) + 18 unit (handshake) + 25 unit (OI regressions) + 19 unit (record) + 10 unit (rekey) + 6 smoke = 129 non-security
+- Total: 164
 
 ## CLAUDE.md §15 conflicts noted
 

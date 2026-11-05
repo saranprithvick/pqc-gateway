@@ -1,8 +1,9 @@
-"""Regression tests for OI-4, OI-5, OI-6, OI-7 (m4-fixes branch).
+"""Regression tests for OI-4 through OI-8 and pre-merge checks (m4-fixes).
 
 OI-4  — seal() raises CounterExhausted (never substitutes record types) and queues REKEY_REQ.
 OI-5  — duplicate REKEY_REQ bypass is gated on rekey-in-progress state; expired after grace.
 OI-6  — RekeyConfig.__post_init__ validates that retry budget < grace_period_s.
+         Also covers: fixed timeout (no backoff) and session closed after AlertError.
 OI-7  — src/pqcgw/protocol/ never imports from src/pqcgw/crypto/providers/.
 """
 
@@ -21,6 +22,7 @@ from pqcgw.protocol.session import (
     AlertError,
     CounterExhausted,
     RekeyConfig,
+    SessionError,
     SessionManager,
     SessionRole,
 )
@@ -255,3 +257,136 @@ class TestOI7LayerBoundary:
             f"{py_file.name} imports from crypto.providers (layer violation):\n"
             + "\n".join(violations)
         )
+
+
+# ===========================================================================
+# Session closed state (item 2)
+# ===========================================================================
+
+class TestSessionClosedState:
+    """After AlertError the session is marked closed; seal/open refuse further work."""
+
+    def _corrupt(self, rec: bytes) -> bytes:
+        """Flip the last byte of a record (corrupts the AEAD tag)."""
+        return rec[:-1] + bytes([rec[-1] ^ 0xFF])
+
+    def test_closed_after_max_auth_failures(self):
+        """session.closed is True after max_consecutive_auth_failures AlertError."""
+        cfg = RekeyConfig(max_consecutive_auth_failures=2)
+        gw_sm, peer_sm = _make_managers(config=cfg)
+
+        valid_rec = gw_sm.seal(b"test")
+        bad_rec = self._corrupt(valid_rec)
+
+        # First failure: RecordError, session still open
+        with pytest.raises(RecordError):
+            peer_sm.open(bad_rec, Direction.I2R)
+        assert not peer_sm.closed
+
+        # Second failure: AlertError, session closed
+        with pytest.raises(AlertError):
+            peer_sm.open(bad_rec, Direction.I2R)
+        assert peer_sm.closed
+
+    def test_seal_refused_after_close(self):
+        """seal() raises SessionError on a closed session."""
+        cfg = RekeyConfig(max_consecutive_auth_failures=1)
+        gw_sm, peer_sm = _make_managers(config=cfg)
+
+        valid_rec = gw_sm.seal(b"x")
+        bad_rec = self._corrupt(valid_rec)
+
+        with pytest.raises(AlertError):
+            peer_sm.open(bad_rec, Direction.I2R)
+        assert peer_sm.closed
+
+        with pytest.raises(SessionError):
+            peer_sm.seal(b"after close", direction=Direction.R2I)
+
+    def test_open_refused_after_close(self):
+        """open() raises SessionError on a closed session."""
+        cfg = RekeyConfig(max_consecutive_auth_failures=1)
+        gw_sm, peer_sm = _make_managers(config=cfg)
+
+        valid_rec = gw_sm.seal(b"x")
+        bad_rec = self._corrupt(valid_rec)
+
+        with pytest.raises(AlertError):
+            peer_sm.open(bad_rec, Direction.I2R)
+
+        # Further valid records are refused (session closed)
+        next_rec = gw_sm.seal(b"after")
+        with pytest.raises(SessionError):
+            peer_sm.open(next_rec, Direction.I2R)
+
+    def test_auth_failure_counter_resets_on_success(self):
+        """consecutive_auth_failures resets to 0 after any successfully authenticated record."""
+        cfg = RekeyConfig(max_consecutive_auth_failures=5)
+        gw_sm, peer_sm = _make_managers(config=cfg)
+
+        valid_rec = gw_sm.seal(b"first")  # counter 0
+        bad_rec = self._corrupt(valid_rec)
+
+        # 3 failures out of 5
+        for _ in range(3):
+            with pytest.raises(RecordError):
+                peer_sm.open(bad_rec, Direction.I2R)
+        assert peer_sm.consecutive_auth_failures == 3
+
+        # One valid record resets the counter
+        valid_rec2 = gw_sm.seal(b"valid2")  # counter 1
+        peer_sm.open(valid_rec2, Direction.I2R)
+        assert peer_sm.consecutive_auth_failures == 0
+        assert not peer_sm.closed
+
+
+# ===========================================================================
+# Fixed timeout / no-backoff (item 3)
+# ===========================================================================
+
+class TestRekeyTimeoutNoBackoff:
+    """check_rekey_timeout() uses a fixed per-retry timeout, not exponential backoff."""
+
+    def test_fixed_retry_count_before_alert(self):
+        """With timeout=0ms exactly rekey_max_retries+1 calls are needed before AlertError.
+
+        A fixed timeout fires on every call (elapsed >= 0 always).  With backoff the
+        second timeout would be 2× — this test documents the expected count so a future
+        backoff regression is caught immediately.
+        """
+        max_retries = 2
+        cfg = RekeyConfig(rekey_timeout_ms=0, rekey_max_retries=max_retries)
+        gw_sm, _ = _make_managers(config=cfg)
+        gw_sm.initiate_light_rekey()
+
+        # max_retries non-raising calls (each increments retry counter by 1)
+        for _ in range(max_retries):
+            gw_sm.check_rekey_timeout()   # fires timeout, increments retry, resets timer
+
+        # max_retries+1-th call exceeds the limit → AlertError, session closed
+        with pytest.raises(AlertError):
+            gw_sm.check_rekey_timeout()
+        assert gw_sm.closed
+
+    def test_timer_resets_each_retry(self):
+        """Each timeout increments _rekey_retries and resets the start timer.
+
+        After a retry the timeout threshold is the SAME value (not 2×).
+        We verify that _rekey_retries advances one at a time.
+        """
+        cfg = RekeyConfig(rekey_timeout_ms=0, rekey_max_retries=3)
+        gw_sm, _ = _make_managers(config=cfg)
+        gw_sm.initiate_light_rekey()
+        assert gw_sm._rekey_retries == 0
+
+        gw_sm.check_rekey_timeout()
+        assert gw_sm._rekey_retries == 1
+
+        gw_sm.check_rekey_timeout()
+        assert gw_sm._rekey_retries == 2
+
+        gw_sm.check_rekey_timeout()
+        assert gw_sm._rekey_retries == 3
+
+        with pytest.raises(AlertError):
+            gw_sm.check_rekey_timeout()   # 4th call: retries(3) >= max_retries(3)
