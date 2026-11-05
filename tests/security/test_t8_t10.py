@@ -17,7 +17,7 @@ import pytest
 from pqcgw.crypto.registry import load_suite
 from pqcgw.protocol.handshake import HandshakeInitiator, HandshakeResponder, IdentityContext
 from pqcgw.protocol.record import Direction, RecordError, RecordType
-from pqcgw.protocol.session import AlertError, RekeyConfig, SessionManager, SessionRole
+from pqcgw.protocol.session import AlertError, CounterExhausted, RekeyConfig, SessionManager, SessionRole
 
 SUITE_DIR = Path(__file__).parent.parent.parent / "configs" / "suites"
 
@@ -164,11 +164,11 @@ def test_t8_duplicate_rekey_req_resends_cached_ack() -> None:
 
 def test_t8_failed_rekey_raises_alert() -> None:
     """If REKEY_ACK never arrives and the timeout expires, AlertError is raised."""
-    cfg = RekeyConfig(rekey_timeout_s=0.0, rekey_max_retries=0)
+    cfg = RekeyConfig(rekey_timeout_ms=0, rekey_max_retries=0)
     gw_sm, peer_sm = _make_managers(config=cfg)
 
     gw_sm.initiate_light_rekey()
-    # Timeout has already expired (rekey_timeout_s=0.0)
+    # Timeout has already expired (rekey_timeout_ms=0)
     with pytest.raises(AlertError):
         gw_sm.check_rekey_timeout()
 
@@ -191,24 +191,31 @@ def test_t8_multiple_rekeys_increase_epoch() -> None:
 # ===========================================================================
 
 def test_t10_counter_limit_triggers_rekey() -> None:
-    """Reaching the counter hard limit causes the initiator to trigger a light rekey."""
+    """Reaching the counter hard limit causes the initiator to raise CounterExhausted
+    and queue the REKEY_REQ; after completing the rekey the session continues."""
     # counter_hard_limit=3: after sealing counters 0,1,2, the next seal fires the trigger
     cfg = RekeyConfig(counter_hard_limit=3, grace_period_records=1, grace_period_s=60.0)
     gw_sm, peer_sm = _make_managers(config=cfg)
 
-    # Seal records 0–3 (4 records; counter becomes 4 on the 4th seal, which is the limit)
+    # Seal records with counters 0, 1, 2 — all succeed
     for i in range(3):
         rec = gw_sm.seal(b"frame" + bytes([i]))
         peer_sm.open(rec, Direction.I2R)
 
-    # The 4th seal (counter == hard limit) must trigger a rekey and return REKEY_REQ
-    req = gw_sm.seal(b"trigger")
-    # The returned bytes should be a REKEY_REQ record (epoch 0)
+    # The 4th seal hits counter == hard limit → CounterExhausted; REKEY_REQ queued
+    with pytest.raises(CounterExhausted):
+        gw_sm.seal(b"trigger")
+
+    # Retrieve the REKEY_REQ from the outbound queue
+    req = gw_sm.take_outbound()
+    assert req is not None, "REKEY_REQ should be in the outbound queue"
+
+    # Verify the queued record is a REKEY_REQ
     from pqcgw.protocol.record import RecordHeader
     hdr = RecordHeader.from_bytes(req[:16])
     assert hdr.rtype == RecordType.REKEY_REQ
 
-    # Complete the rekey so we can verify the session continues
+    # Complete the rekey
     rtype, _ = peer_sm.open(req, Direction.I2R)
     assert rtype == RecordType.REKEY_REQ
     ack = peer_sm.take_outbound()
@@ -225,14 +232,19 @@ def test_t10_counter_limit_triggers_rekey() -> None:
 
 
 def test_t10_counter_limit_closes_on_failed_rekey() -> None:
-    """Counter exhaustion with an immediately-expiring timeout raises AlertError."""
+    """Counter exhaustion raises CounterExhausted; with zero timeout the subsequent
+    check_rekey_timeout call raises AlertError (session closes)."""
     # counter_hard_limit=1: after sealing counter 0, next seal fires the trigger
-    cfg = RekeyConfig(counter_hard_limit=1, rekey_timeout_s=0.0, rekey_max_retries=0)
+    cfg = RekeyConfig(counter_hard_limit=1, rekey_timeout_ms=0, rekey_max_retries=0)
     gw_sm, _ = _make_managers(config=cfg)
 
-    # First seal uses counter 0; outbound counter is now 1 (== hard limit)
+    # First seal uses counter 0; counter becomes 1 (== hard limit)
     gw_sm.seal(b"a")
 
-    # Second seal triggers rekey (counter == hard limit), then timeout fires immediately
-    with pytest.raises(AlertError):
+    # Second seal hits the counter limit → CounterExhausted + REKEY_REQ queued
+    with pytest.raises(CounterExhausted):
         gw_sm.seal(b"b")
+
+    # Rekey is in progress (REQ_SENT), timeout is 0ms → AlertError on next check
+    with pytest.raises(AlertError):
+        gw_sm.check_rekey_timeout()

@@ -33,9 +33,17 @@ class HkdfSha256(_HkdfBase):
     def __init__(self) -> None:
         super().__init__(hashes.SHA256())
 
+    @property
+    def hash_name(self) -> str:
+        return "sha256"
+
 
 class HkdfSha384(_HkdfBase):
     """HKDF with SHA-384."""
 
     def __init__(self) -> None:
         super().__init__(hashes.SHA384())
+
+    @property
+    def hash_name(self) -> str:
+        return "sha384"
