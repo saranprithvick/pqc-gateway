@@ -52,6 +52,13 @@ class Signature(ABC):
 class KDF(ABC):
     """Key-derivation function interface (HKDF-style extract-then-expand)."""
 
+    @property
+    @abstractmethod
+    def hash_name(self) -> str:
+        """Name of the underlying hash ('sha256' or 'sha384').
+        Protocol code uses this instead of importing concrete provider classes.
+        """
+
     @abstractmethod
     def extract(self, salt: bytes, ikm: bytes) -> bytes:
         """Extract a pseudorandom key from ikm using salt.  Return prk."""

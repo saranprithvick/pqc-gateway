@@ -22,7 +22,6 @@ import hashlib
 from dataclasses import dataclass, field
 
 from pqcgw.crypto.registry import Suite
-from pqcgw.crypto.providers.kdf_hkdf import HkdfSha256, HkdfSha384
 
 
 @dataclass
@@ -41,13 +40,16 @@ class SessionKeys:
 
 
 def suite_hash(suite: "Suite"):
-    """Return the hashlib constructor matching the suite's KDF (§15 item 7)."""
-    if isinstance(suite.kdf, HkdfSha256):
+    """Return the hashlib constructor matching the suite's KDF (§15 item 7).
+
+    Uses KDF.hash_name so this module never imports concrete provider classes.
+    """
+    name = suite.kdf.hash_name
+    if name == "sha256":
         return hashlib.sha256
-    if isinstance(suite.kdf, HkdfSha384):
+    if name == "sha384":
         return hashlib.sha384
-    # Fallback: inspect the KDF's algorithm name if it exists
-    raise TypeError(f"Cannot determine hash for KDF type {type(suite.kdf)}")
+    raise TypeError(f"Unsupported KDF hash name: {name!r}")
 
 
 def _info(label: str, suite_id: int, th: bytes, epoch: int) -> bytes:
