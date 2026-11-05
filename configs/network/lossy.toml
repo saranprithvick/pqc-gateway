@@ -1,0 +1,7 @@
+delay_ms = 5.0
+jitter_ms = 1.0
+loss_pct = 1.0
+bandwidth_kbps = 6000.0
+reorder_pct = 0.0
+mtu_bytes = 1500
+seed = 42
