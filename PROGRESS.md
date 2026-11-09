@@ -10,7 +10,7 @@
 | M3 | DONE | 33 new tests pass (19 unit + 14 security: T1, T2, T3, T7, T9, T11). Branch m3-record-layer. |
 | M4 | DONE | 19 new tests pass (10 unit + 9 security: T8, T10). Branch m4-rekey. |
 | M5a | DONE | 226 tests pass. Branch m5a-integration merged to main (2453bbd). Milestone logs written. |
-| M5b | Not started | Branch m5b-rekey-link: light rekey triggers in async loop, full rekey (§15 item 16), epoch-255 guard, T9 full-rekey span. Tag m5-done only after M5b. |
+| M5b | DONE | 239 tests pass. Branch m5b-rekey-link (3 commits: m5b-01-proto, m5b-02-stack, m5b-03-tests). Merge to main pending approval. |
 | M6 | Not started | |
 | M7 | Not started | |
 | M8 | Not started | |
@@ -53,7 +53,22 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M5a merged to main (2026-11-09). Start M5b on branch m5b-rekey-link (see M5b scope below).
+M5b complete (2026-11-09). All 239 tests pass on branch m5b-rekey-link.
+Pending: merge m5b-rekey-link to main, tag m5-done, then start M6 (full security suite T1–T13 across C0–C3, agility matrix runner).
+
+## M5b deliverables (3 commits on m5b-rekey-link, 2026-11-09)
+
+**m5b-01-proto** — `session.py`: `RekeyTrigger`, retransmit queue, `_prev_session_id` + `known_session_ids`, `_route_open` session_id+epoch guard.
+**m5b-02-stack** — `gateway.py`, `peer.py`: 1-byte type prefix (§15 item 22), M5a handshake fix (loop on unexpected first message), light/full rekey triggers, retransmit drain, `_pending` flush on REKEY_ACK and full-rekey success, `_do_full_rekey` coroutine, `_handle_hs_message` on peer, epoch-254 guard, full-rekey switch-over via trial open.
+**m5b-03-tests** — 13 `test_e2e_link.py` tests, 1 `test_handshake.py` regression, 1 T9 full-rekey span.
+
+**Key implementation notes:**
+- **legacy CAN traffic is periodic**: if the gateway sends no DATA after `promote_full_rekey()` (CAN bus quiet), the peer's `_fr_pending` is not consumed. Peer switches on the first CAN frame forwarded after the full rekey. Acceptable.
+- **`_fr` kept alive after FINISHED_I** so cached HELLO_R can be served on retransmit. Lazily cleared when `_fr_session_id` leaves `_sm.known_session_ids` AND `_fr_pending` is None.
+- **Full-rekey FINISHED_I retransmit**: if a retransmitted HELLO_I arrives after `_fr` has been lazily cleared, the peer cannot return the cached HELLO_R. The initiator's per-attempt deadline expires and triggers a new attempt. Acceptable edge case.
+- **`RekeyTrigger` fields** must be loadable from TOML config by M7 (`configs/sessions/default.toml`).
+- **Test 7 bug**: original test wrapped `gw_link_inner` with `_DropAllWhere(_is_hello_r)`, which had no effect (gateway never sends HELLO_R). Rewritten to wrap `peer_link_inner` (peer's outbound) so HELLO_R is actually dropped. Frames injected during the failed-attempt window are delivered on the old session before the full-rekey task is cancelled in `finally`.
+- **Cross-test contamination**: wrapping `peer_link_inner` in test 7 also fixed a race condition where the second `request_full_rekey()` could promote the gateway to a new session before the peer received FINISHED_I for it, causing the peer to drop frames 2 and 3 as "unknown session".
 
 ## M5a deliverables (commit m5a-03-core, 2026-11-05)
 
