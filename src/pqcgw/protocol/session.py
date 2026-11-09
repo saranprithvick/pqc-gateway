@@ -56,6 +56,19 @@ _HEADER_LEN = 16
 # ---------------------------------------------------------------------------
 
 @dataclass
+class RekeyTrigger:
+    """Config for automatic rekey triggers in the Gateway run loop.
+
+    All fields default to 0 (disabled).  Values are loadable from TOML config
+    by M7 (e.g. configs/sessions/default.toml).
+    """
+
+    interval_s: float = 0.0    # trigger after this many seconds (0 = off)
+    record_count: int = 0       # trigger after this many records sealed (0 = off)
+    byte_count: int = 0         # trigger after this many payload bytes sealed (0 = off)
+
+
+@dataclass
 class RekeyConfig:
     """Configurable limits and timeouts for the session manager.
 
@@ -189,6 +202,12 @@ class SessionManager:
         # Outbound message queue (control messages queued by open())
         self._outbound_queue: list[bytes] = []
 
+        # Cached REKEY_REQ bytes for retransmit on timeout (initiator only)
+        self._cached_initiator_req: bytes | None = None
+
+        # Previous session_id during grace (for _route_open session_id guard)
+        self._prev_session_id: bytes | None = None
+
     # -----------------------------------------------------------------------
     # Public API
     # -----------------------------------------------------------------------
@@ -209,6 +228,14 @@ class SessionManager:
     @property
     def consecutive_auth_failures(self) -> int:
         return self._auth_failures
+
+    @property
+    def known_session_ids(self) -> frozenset[bytes]:
+        """Current and previous (grace-period) session ids."""
+        ids: set[bytes] = {self._session_id}
+        if self._prev_session_id is not None:
+            ids.add(self._prev_session_id)
+        return frozenset(ids)
 
     def seal(
         self,
@@ -320,7 +347,7 @@ class SessionManager:
 
         # Track new-epoch records for grace-period expiry
         if self._rekey_state in (RekeyState.GRACE, RekeyState.ACK_SENT):
-            if hdr.epoch == self._rl_current._keys.epoch:
+            if hdr.session_id == self._session_id and hdr.epoch == self._rl_current._keys.epoch:
                 self._new_epoch_records += 1
 
         return rtype, plaintext
@@ -351,6 +378,7 @@ class SessionManager:
         self._rekey_timer_start = time.monotonic()
 
         req = self._rl_current.seal(RecordType.REKEY_REQ, b"", Direction.I2R)
+        self._cached_initiator_req = req   # stored for retransmit on timeout
         log.info("Light rekey initiated: epoch %d → %d", self.epoch, self.epoch + 1)
         return req
 
@@ -373,14 +401,16 @@ class SessionManager:
                 )
             self._rekey_retries += 1
             self._rekey_timer_start = time.monotonic()
+            if self._cached_initiator_req is not None:
+                self._outbound_queue.append(self._cached_initiator_req)
 
     def promote_full_rekey(self, new_keys: SessionKeys, new_session_id: bytes) -> None:
         """Swap in a freshly completed full-rekey session (§15 item 16).
 
         The old session enters the grace period; the caller must continue to handle
         inbound records with the old session_id until the grace period expires.
-        (Full rekey management is exercised in M5+.)
         """
+        self._prev_session_id = self._session_id   # captured before _start_grace
         self._start_grace()
         self._rl_current = RecordLayer(self._suite, new_keys, new_session_id)
         self._rw_current = {Direction.I2R: ReplayWindow(), Direction.R2I: ReplayWindow()}
@@ -397,19 +427,24 @@ class SessionManager:
         hdr: RecordHeader,
         direction: Direction,
     ) -> tuple[RecordType, bytes]:
-        """Route a record to the right RecordLayer by epoch."""
+        """Route a record to the right RecordLayer by session_id and epoch.
+
+        Guarding by session_id prevents the edge case where a full-rekey new session
+        and the old session's first epoch share epoch==0.
+        """
         cur_epoch = self._rl_current._keys.epoch
 
-        if hdr.epoch == cur_epoch:
+        if hdr.session_id == self._session_id and hdr.epoch == cur_epoch:
             try:
                 return self._rl_current.open(data, direction, self._rw_current[direction])
             except RecordError:
                 self._on_auth_failure()
                 raise
 
-        # Try previous epoch during grace period
+        # Try previous session/epoch during grace period
         if (
             self._rl_prev is not None
+            and hdr.session_id == self._prev_session_id
             and hdr.epoch == self._rl_prev._keys.epoch
             and not self._grace_expired()
         ):
@@ -421,8 +456,9 @@ class SessionManager:
 
         self._on_auth_failure()
         raise RecordError(
-            f"Record epoch {hdr.epoch} not accepted "
-            f"(current={cur_epoch}, grace={'active' if self._rl_prev else 'none'})"
+            f"Record session/epoch ({hdr.session_id.hex()}/{hdr.epoch}) not accepted "
+            f"(current={self._session_id.hex()}/{cur_epoch}, "
+            f"grace={'active' if self._rl_prev else 'none'})"
         )
 
     def _handle_rekey_req(self, raw_req: bytes) -> None:
@@ -478,6 +514,9 @@ class SessionManager:
 
     def _start_grace(self) -> None:
         """Move current RecordLayer to previous slot, start the grace clock."""
+        # For light rekey old == new session_id; for full rekey caller sets _prev_session_id first.
+        if self._prev_session_id is None:
+            self._prev_session_id = self._session_id
         self._rl_prev = self._rl_current
         self._rw_prev = dict(self._rw_current)
         self._grace_start = time.monotonic()
@@ -499,6 +538,7 @@ class SessionManager:
         """Discard the previous-epoch state."""
         self._rl_prev = None
         self._rw_prev = None
+        self._prev_session_id = None
         if self._rekey_state in (RekeyState.GRACE, RekeyState.ACK_SENT):
             self._rekey_state = RekeyState.IDLE
 
