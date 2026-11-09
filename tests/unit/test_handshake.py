@@ -221,3 +221,36 @@ def test_finished_i_not_equal_finished_r(suite_name: str) -> None:
     finished_r, _ = responder.process_finished_i(finished_i)
 
     assert finished_i != finished_r, "FINISHED_I and FINISHED_R must never be equal"
+
+
+# ===========================================================================
+# 6. M5b regression: HELLO_I retransmit in HELLO_RECEIVED state must return
+#    cached HELLO_R, not be mistaken for FINISHED_I (§15 item 22)
+# ===========================================================================
+
+def test_peer_hello_i_retransmit_in_hello_received_state() -> None:
+    """A second HELLO_I while in HELLO_RECEIVED state returns byte-identical HELLO_R.
+
+    Regression for the M5a flaw where peer.handshake() used byte-exact comparison
+    to detect retransmits; with the type-prefix dispatch (§15 item 22) this test
+    verifies that the responder's _cache is what gates retransmit identity, not
+    byte comparison on the full prefixed message.
+    """
+    suite = load_suite(SUITE_DIR / "classical.toml")
+    init_id, resp_id = _make_identities("classical")
+    responder = HandshakeResponder(suite, resp_id)
+
+    initiator = HandshakeInitiator(suite, init_id)
+    hello_i = initiator.start()
+
+    # First HELLO_I: responder processes and returns HELLO_R
+    hello_r_first = responder.process_hello_i(hello_i)
+    assert responder.state == "HELLO_RECEIVED"
+
+    # Second HELLO_I (retransmit): must return byte-identical HELLO_R from cache
+    hello_r_second = responder.process_hello_i(hello_i)
+    assert hello_r_second == hello_r_first, (
+        "Retransmitted HELLO_I must produce byte-identical HELLO_R (cached)"
+    )
+    # State must remain HELLO_RECEIVED (not advance to ESTABLISHED or FAILED)
+    assert responder.state == "HELLO_RECEIVED"

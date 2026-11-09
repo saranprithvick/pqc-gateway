@@ -1,10 +1,7 @@
-"""OI-8: T9 nonce-uniqueness extended across light rekeys.
+"""T9 nonce-uniqueness extended across light rekeys and full rekeys.
 
 Verifies that (key, nonce) pairs do not repeat across epoch 0, 1, and 2 in both
-the I2R and R2I directions.  Epoch keys and salts are captured before sealing each
-record so the check is authoritative even if the keys change mid-loop.
-
-NOTE: Full-rekey span is deferred to M5 when the new-session path is wired up.
+the I2R and R2I directions, and across a full-rekey boundary (new session_id).
 """
 
 from __future__ import annotations
@@ -18,6 +15,8 @@ from pqcgw.crypto.registry import load_suite
 from pqcgw.protocol.handshake import HandshakeInitiator, HandshakeResponder, IdentityContext
 from pqcgw.protocol.record import Direction, RecordType
 from pqcgw.protocol.session import RekeyConfig, SessionManager, SessionRole
+
+N_PER_SESSION = 100  # records per direction for full-rekey test
 
 SUITE_DIR = Path(__file__).parent.parent.parent / "configs" / "suites"
 
@@ -143,3 +142,35 @@ def test_t9_epoch_keys_differ_across_rekeys() -> None:
     assert snap0 != snap1, "Epoch 0 and 1 keys must differ"
     assert snap1 != snap2, "Epoch 1 and 2 keys must differ"
     assert snap0 != snap2, "Epoch 0 and 2 keys must differ"
+
+
+def test_t9_nonce_uniqueness_spans_full_rekey() -> None:
+    """No (key, nonce) pair repeats across a full-rekey boundary (new session_id)."""
+    cfg = RekeyConfig(grace_period_records=N_PER_SESSION * 10, grace_period_s=60.0)
+    suite, gw_keys, peer_keys, session_id = _handshake_both_sides("classical")
+    gw_sm = SessionManager(suite, gw_keys, session_id, SessionRole.INITIATOR, config=cfg)
+    peer_sm = SessionManager(suite, peer_keys, session_id, SessionRole.RESPONDER, config=cfg)
+
+    all_pairs: set[tuple[bytes, bytes]] = set()
+
+    # Collect pairs from initial session (epoch 0)
+    old_k_i2r = gw_sm._rl_current._keys.k_i2r
+    _collect_epoch(gw_sm, peer_sm, N_PER_SESSION, all_pairs)
+    assert gw_sm.epoch == 0
+
+    # Run a fresh handshake to simulate full rekey (new session_id)
+    suite2, new_gw_keys, new_peer_keys, new_session_id = _handshake_both_sides("classical")
+    assert new_session_id != session_id, "New handshake must produce a different session_id"
+
+    # Promote both sides
+    gw_sm.promote_full_rekey(new_gw_keys, new_session_id)
+    peer_sm.promote_full_rekey(new_peer_keys, new_session_id)
+
+    # Collect pairs from new session (epoch 0 on new session_id)
+    assert gw_sm.epoch == 0
+    assert gw_sm._session_id == new_session_id
+    _collect_epoch(gw_sm, peer_sm, N_PER_SESSION, all_pairs)
+
+    # All pairs must be unique (key differs between sessions → no nonce collision)
+    assert len(all_pairs) == N_PER_SESSION * 2 * 2  # 2 sessions × 2 directions
+    assert new_gw_keys.k_i2r != old_k_i2r, "Full rekey must produce different k_i2r"
