@@ -9,7 +9,7 @@
 | M2 | DONE | 28 new tests pass (18 unit + 10 security: T4, T5, T6, T13). Branch m2-handshake. |
 | M3 | DONE | 33 new tests pass (19 unit + 14 security: T1, T2, T3, T7, T9, T11). Branch m3-record-layer. |
 | M4 | DONE | 19 new tests pass (10 unit + 9 security: T8, T10). Branch m4-rekey. |
-| M5a | DONE | 226 tests pass (m5a-01-can + m5a-02-net + m5a-03-core commits). Branch m5a-integration. |
+| M5a | DONE | 226 tests pass. Branch m5a-integration merged to main (2453bbd). Milestone logs written. |
 | M5b | Not started | Branch m5b-rekey-link: light rekey triggers in async loop, full rekey (§15 item 16), epoch-255 guard, T9 full-rekey span. Tag m5-done only after M5b. |
 | M6 | Not started | |
 | M7 | Not started | |
@@ -53,7 +53,7 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M5a is complete (226 tests pass on branch m5a-integration). Await human approval to merge to main, then start M5b on branch m5b-rekey-link.
+M5a merged to main (2026-11-09). Start M5b on branch m5b-rekey-link (see M5b scope below).
 
 ## M5a deliverables (commit m5a-03-core, 2026-11-05)
 
