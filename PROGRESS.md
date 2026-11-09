@@ -9,7 +9,8 @@
 | M2 | DONE | 28 new tests pass (18 unit + 10 security: T4, T5, T6, T13). Branch m2-handshake. |
 | M3 | DONE | 33 new tests pass (19 unit + 14 security: T1, T2, T3, T7, T9, T11). Branch m3-record-layer. |
 | M4 | DONE | 19 new tests pass (10 unit + 9 security: T8, T10). Branch m4-rekey. |
-| M5 | Not started | |
+| M5a | DONE | 226 tests pass (m5a-01-can + m5a-02-net + m5a-03-core commits). Branch m5a-integration. |
+| M5b | Not started | Branch m5b-rekey-link: light rekey triggers in async loop, full rekey (§15 item 16), epoch-255 guard, T9 full-rekey span. Tag m5-done only after M5b. |
 | M6 | Not started | |
 | M7 | Not started | |
 | M8 | Not started | |
@@ -52,7 +53,49 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-Await human approval to merge `m4-fixes` → `main`, then start M5 (python-can virtual bus, LegacyNode, CanAdapter, Gateway, ModernPeer, LinkEmulator, C0 passthrough; T12 documented).
+M5a is complete (226 tests pass on branch m5a-integration). Await human approval to merge to main, then start M5b on branch m5b-rekey-link.
+
+## M5a deliverables (commit m5a-03-core, 2026-11-05)
+
+**New files:**
+- `src/pqcgw/nodes/passthrough.py` — C0 PassthroughPath (no handshake/crypto)
+- `src/pqcgw/nodes/gateway.py` — Gateway (async initiator, §15 item 20 buffering, reverse path, item 18 counters)
+- `src/pqcgw/nodes/peer.py` — ModernPeer (async responder, §15 item 20 duplicate FINISHED handling)
+- `src/pqcgw/attacks/attacker.py` — Attacker (FOR TESTS ONLY)
+- `tests/conftest.py` — unique virtual-bus channel fixture
+- `tests/unit/test_e2e.py` — C0–C3 E2E over LoopbackLink (6 tests)
+- `tests/unit/test_e2e_link.py` — C1 over LinkEmulator: fragmented + lossy handshake (2 tests)
+- `tests/security/test_t12.py` — T12: forged CAN frame forwarded (1 test)
+
+**Key implementation notes:**
+- python-can virtual bus does NOT echo sends to the sender; tests inject from a separate `CanAdapter` instance.
+- `_buffer_can` cancel race: avoided by `asyncio.wait({buf_task}, timeout=0.15)` instead of immediate `cancel()`.
+- §15 item 9 (HELLO_I retransmit): `peer.handshake()` loops on inbound messages, resending cached HELLO_R on byte-identical HELLO_I retransmit.
+- §15 item 20 (FINISHED_I retransmit in data phase): `peer._handle_inbound()` resends cached FINISHED_R if wire == `_cached_finished_i`.
+- `peer.run(n_frames=None)` runs indefinitely (needed for loss-retransmit tests).
+
+## M5b scope (branch m5b-rekey-link)
+
+1. Light rekey triggers in async Gateway/Peer loop (elapsed time, record count, byte count).
+2. REKEY_REQ retransmit over link (fixed 400ms, 3 retries per §15 item 21).
+3. Full rekey per §15 item 16 (parallel session, new session_id, old session grace period).
+4. Epoch-255 guard → trigger full rekey.
+5. Flush `_pending` buffer after REKEY_ACK received.
+6. `test_e2e_link`: add `test_e2e_c1_light_rekey_in_flight`.
+7. T9 extended to verify (key, nonce) uniqueness across a full-rekey boundary.
+8. Tag `m5-done` only after M5b is merged.
+
+## Deferred to M5b and later
+
+| Item | Target |
+|------|--------|
+| Light rekey triggers in async loop | M5b |
+| Full rekey (§15 item 16), epoch-255 guard | M5b |
+| `_pending` flush after REKEY_ACK | M5b |
+| T9 full-rekey span | M5b |
+| LegacyNode rate-driven emission, command path | M7 |
+| Attacker on the network link (sniff/modify/inject) | M6 |
+| LinkEmulator reorder/bandwidth-cap unit tests | before M7 |
 
 ## Resolved issues (m4-fixes, 2026-11-05)
 

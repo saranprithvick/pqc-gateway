@@ -1,0 +1,25 @@
+seed = 42
+
+[[profiles]]
+can_id = 0x100
+rate_hz = 100.0
+dlc = 8
+payload_pattern = "counter"
+is_fd = false
+is_extended = false
+
+[[profiles]]
+can_id = 0x200
+rate_hz = 50.0
+dlc = 4
+payload_pattern = "zeros"
+is_fd = false
+is_extended = false
+
+[[profiles]]
+can_id = 0x300
+rate_hz = 10.0
+dlc = 2
+payload_pattern = "random"
+is_fd = false
+is_extended = false
