@@ -114,6 +114,14 @@ class LinkEmulator:
     def fragments_sent_r2i(self) -> int:
         return self._frags_r2i[0]
 
+    @property
+    def gateway_half(self) -> Link:
+        return self._gw_half
+
+    @property
+    def peer_half(self) -> Link:
+        return self._peer_half
+
     def _start(self) -> None:
         if self._started:
             return

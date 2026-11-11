@@ -1,0 +1,9 @@
+suite_id = 21
+name = "matrix-x-falcon512"
+kem = ["x25519", "ml-kem-768"]
+signature = ["falcon-512"]
+kdf = "hkdf-sha256"
+aead = "aes-256-gcm"
+# Falcon-512: pre-standard lattice signature (NIST level 1).  liboqs has
+# Falcon-512 and Falcon-1024; there is no level-3 variant.  Labelled
+# experimental.  Available only if liboqs exposes it.
