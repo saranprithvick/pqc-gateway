@@ -6,6 +6,21 @@ import uuid
 
 import pytest
 
+# Re-export suite helpers so tests can also do `from conftest import …` if needed.
+from tests.suite_helpers import (  # noqa: F401
+    ALL_MATRIX_SUITES,
+    ALL_SUITE_IDS,
+    ALL_SUITES_FOR_SECURITY,
+    MATRIX_EXPERIMENTAL,
+    MATRIX_NON_EXP,
+    STANDARD_SUITES,
+    SUITE_DIR,
+    suite_path,
+)
+
+# ---------------------------------------------------------------------------
+# Shared fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def can_channel() -> str:

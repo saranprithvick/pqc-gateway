@@ -11,7 +11,7 @@
 | M4 | DONE | 19 new tests pass (10 unit + 9 security: T8, T10). Branch m4-rekey. |
 | M5a | DONE | 226 tests pass. Branch m5a-integration merged to main (2453bbd). Milestone logs written. |
 | M5b | DONE | 239 tests pass. Branch m5b-rekey-link (3 commits: m5b-01-proto, m5b-02-stack, m5b-03-tests). Merge to main pending approval. |
-| M6 | Not started | |
+| M6 | DONE | 333 non-slow tests pass (118 security + 13 agility + 202 unit/smoke). Branch m6-security-agility. |
 | M7 | Not started | |
 | M8 | Not started | |
 
@@ -53,8 +53,8 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M5b complete (2026-11-09). All 239 tests pass on branch m5b-rekey-link.
-Pending: merge m5b-rekey-link to main, tag m5-done, then start M6 (full security suite T1–T13 across C0–C3, agility matrix runner).
+M6 complete (2026-11-11). 333 non-slow tests pass on branch m6-security-agility.
+Pending: user approval to merge m6-security-agility to main, tag m6-done, then start M7 (benchmark harness, network profiles, analytical scripts, results tables and plots).
 
 ## M5b deliverables (3 commits on m5b-rekey-link, 2026-11-09)
 
@@ -88,6 +88,29 @@ Pending: merge m5b-rekey-link to main, tag m5-done, then start M6 (full security
 - §15 item 9 (HELLO_I retransmit): `peer.handshake()` loops on inbound messages, resending cached HELLO_R on byte-identical HELLO_I retransmit.
 - §15 item 20 (FINISHED_I retransmit in data phase): `peer._handle_inbound()` resends cached FINISHED_R if wire == `_cached_finished_i`.
 - `peer.run(n_frames=None)` runs indefinitely (needed for loss-retransmit tests).
+
+## M6 deliverables (3 commits on m6-security-agility, 2026-11-11)
+
+**m6-01-security-agility** — full security + agility implementation:
+- T1–T13 parametrized over all standard (C1–C3) + 13 matrix suites
+- `LinkAttacker` in `attacks/link_attacker.py`: wraps any Link pair; fixed I2R/R2I pump direction (gw_inner.send for I2R, peer_inner.send for R2I)
+- Link-level T1–T3 (`test_t1_t3_link.py`): E2E attacks via LinkAttacker; asserts `consecutive_auth_failures==1` for C1–C3; confirms vulnerability on C0
+- T12 parametrized over C0–C3
+- 13 agility suite TOMLs in `configs/suites/matrix/` (suite_ids 10–21), one-factor-at-a-time from C3
+- `configs/matrix.toml`: entry list with factor + experimental flag
+- `tests/agility/test_agility.py`: §4 criteria per entry (config-only, handshake, fragment counts, traffic, T1–T11+T13); experimental → mechanism_absent skip
+- `scripts/run_matrix.py`: refuses if src/ dirty; writes `results/tables/agility.csv` from junitxml
+- `scripts/make_security_table.py`: §9 T1–T13 table from junitxml
+- `tests/suite_helpers.py`: shared constants (ALL_SUITE_IDS, suite_path)
+- pyproject.toml: `slow` marker registered
+
+**m6-02-fix-emulator-halves** — `LinkEmulator.gateway_half`/`peer_half` now call `_start()` to ensure impairment tasks run when halves are accessed directly.
+
+**Key implementation notes:**
+- `LinkAttacker` direction fix: `LoopbackLink` semantics — `gw_half.send()` puts into `a_to_b`, readable by `peer_half.recv()`. I2R pump must call `gw_inner.send()` (not `peer_inner.send()`). Both pump and inject were initially reversed.
+- T3 C1–C3: injected record must have correct session_id+epoch to reach the AEAD check (random session_id hits `unknown_session_drops`, not `consecutive_auth_failures`).
+- Peer runs with `n_frames=None` in link-level tests so it's alive to process (and reject) the attack after legitimate frames.
+- Experimental entries (x-hqc3, x-falcon512): both available in liboqs 0.16.0 on this machine, so they PASS rather than skip.
 
 ## M5b scope (branch m5b-rekey-link)
 

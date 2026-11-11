@@ -25,3 +25,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (heavy PQC or large iteration count); deselect with -m 'not slow'",
+]

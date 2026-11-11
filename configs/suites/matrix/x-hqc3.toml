@@ -1,0 +1,9 @@
+suite_id = 20
+name = "matrix-x-hqc3"
+kem = ["hqc-3"]
+signature = ["ecdsa-p256", "ml-dsa-65"]
+kdf = "hkdf-sha256"
+aead = "aes-256-gcm"
+# HQC-3: level-3 (AES-192 equivalent) experimental KEM; available only if
+# liboqs exposes it.  Uses standalone HQC-3, replacing the full hybrid combiner.
+# FIPS-standard status: pre-standardisation as of liboqs 0.16.0.

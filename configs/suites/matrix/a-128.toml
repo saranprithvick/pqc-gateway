@@ -1,0 +1,6 @@
+suite_id = 18
+name = "matrix-a-128"
+kem = ["x25519", "ml-kem-768"]
+signature = ["ecdsa-p256", "ml-dsa-65"]
+kdf = "hkdf-sha256"
+aead = "aes-128-gcm"

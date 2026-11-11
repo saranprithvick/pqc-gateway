@@ -114,6 +114,16 @@ class LinkEmulator:
     def fragments_sent_r2i(self) -> int:
         return self._frags_r2i[0]
 
+    @property
+    def gateway_half(self) -> Link:
+        self._start()  # ensure impairment tasks are running before first use
+        return self._gw_half
+
+    @property
+    def peer_half(self) -> Link:
+        self._start()
+        return self._peer_half
+
     def _start(self) -> None:
         if self._started:
             return

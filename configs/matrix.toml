@@ -1,0 +1,114 @@
+# Agility matrix: one-factor-at-a-time from the C3 baseline (hybrid KEM,
+# dual signature, hkdf-sha256, aes-256-gcm).
+#
+# Design rules (§7 C4, §4):
+#   - Each KEM entry replaces the entire KEM combiner (not just the PQC half).
+#   - Each SIG entry replaces the entire signature combiner (not just the PQC half).
+#   - suite_ids are unique; all must appear in both sides' allowed_suite_ids.
+#   - Experimental entries (hqc-3, falcon-512) are reported but never skipped.
+#
+# Suite IDs in use: 1 (classical/C1), 2 (pqc/C2), 3 (hybrid/C3), 10–21 (matrix).
+
+[[entries]]
+entry_id    = "base"
+suite_id    = 3
+description = "C3 baseline: hybrid KEM + dual signature + SHA-256 KDF + AES-256-GCM"
+toml        = "configs/suites/matrix/base.toml"
+factor      = "baseline"
+experimental = false
+
+[[entries]]
+entry_id    = "k-512"
+suite_id    = 10
+description = "KEM swap: standalone ML-KEM-512 (replaces full hybrid)"
+toml        = "configs/suites/matrix/k-512.toml"
+factor      = "kem"
+experimental = false
+
+[[entries]]
+entry_id    = "k-768"
+suite_id    = 11
+description = "KEM swap: standalone ML-KEM-768 (replaces full hybrid)"
+toml        = "configs/suites/matrix/k-768.toml"
+factor      = "kem"
+experimental = false
+
+[[entries]]
+entry_id    = "k-1024"
+suite_id    = 12
+description = "KEM swap: standalone ML-KEM-1024 (replaces full hybrid)"
+toml        = "configs/suites/matrix/k-1024.toml"
+factor      = "kem"
+experimental = false
+
+[[entries]]
+entry_id    = "s-44"
+suite_id    = 13
+description = "SIG swap: standalone ML-DSA-44 (replaces full dual sig)"
+toml        = "configs/suites/matrix/s-44.toml"
+factor      = "sig"
+experimental = false
+
+[[entries]]
+entry_id    = "s-87"
+suite_id    = 14
+description = "SIG swap: standalone ML-DSA-87 (replaces full dual sig)"
+toml        = "configs/suites/matrix/s-87.toml"
+factor      = "sig"
+experimental = false
+
+[[entries]]
+entry_id    = "s-slh"
+suite_id    = 15
+description = "SIG swap: standalone SLH-DSA-SHA2-128f (~17 KB sig, stress test)"
+toml        = "configs/suites/matrix/s-slh.toml"
+factor      = "sig"
+experimental = false
+
+[[entries]]
+entry_id    = "s-ecdsa"
+suite_id    = 16
+description = "SIG swap: standalone ECDSA-P256 only (classical regression check)"
+toml        = "configs/suites/matrix/s-ecdsa.toml"
+factor      = "sig"
+experimental = false
+
+[[entries]]
+entry_id    = "d-384"
+suite_id    = 17
+description = "KDF swap: HKDF-SHA-384"
+toml        = "configs/suites/matrix/d-384.toml"
+factor      = "kdf"
+experimental = false
+
+[[entries]]
+entry_id    = "a-128"
+suite_id    = 18
+description = "AEAD swap: AES-128-GCM"
+toml        = "configs/suites/matrix/a-128.toml"
+factor      = "aead"
+experimental = false
+
+[[entries]]
+entry_id    = "a-cha"
+suite_id    = 19
+description = "AEAD swap: ChaCha20-Poly1305"
+toml        = "configs/suites/matrix/a-cha.toml"
+factor      = "aead"
+experimental = false
+
+[[entries]]
+entry_id    = "x-hqc3"
+suite_id    = 20
+description = "Experimental KEM: HQC-3 (level 3, pre-standardisation)"
+toml        = "configs/suites/matrix/x-hqc3.toml"
+factor      = "kem"
+experimental = true
+
+[[entries]]
+entry_id    = "x-falcon512"
+suite_id    = 21
+description = "Experimental SIG: Falcon-512 (pre-standard, no NIST level-3 variant)"
+toml        = "configs/suites/matrix/x-falcon512.toml"
+factor      = "sig"
+experimental = true
