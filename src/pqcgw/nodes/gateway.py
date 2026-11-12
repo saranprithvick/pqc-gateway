@@ -41,6 +41,7 @@ from pqcgw.legacy.can_model import CANFrame
 from pqcgw.net.link import Link
 from pqcgw.nodes.adapter import MessageAdapter
 from pqcgw.protocol.handshake import HandshakeError, HandshakeInitiator, IdentityContext
+from pqcgw.protocol.hooks import CryptoHook, NullCryptoHook
 from pqcgw.protocol.record import Direction, RecordType
 from pqcgw.protocol.session import (
     AlertError,
@@ -84,6 +85,8 @@ class Gateway:
         full_rekey_max_attempts: int = 3,
         handshake_timeout_ms: int = 200,
         handshake_max_retries: int = 5,
+        crypto_hook: Optional[CryptoHook] = None,
+        latency_tracker: Optional[object] = None,
     ) -> None:
         self._suite = suite
         self._identity = identity
@@ -94,6 +97,8 @@ class Gateway:
         self._full_rekey_max_attempts = full_rekey_max_attempts
         self._hs_timeout_ms = handshake_timeout_ms
         self._hs_max_retries = handshake_max_retries
+        self._crypto_hook: CryptoHook = crypto_hook if crypto_hook is not None else NullCryptoHook()
+        self._latency_tracker = latency_tracker
 
         self._sm: Optional[SessionManager] = None
 
@@ -127,6 +132,7 @@ class Gateway:
         # Instrumentation (item 18)
         self._hs_success: bool = False
         self._hs_retransmits: int = 0
+        self._hs_retransmit_wait_ns: int = 0  # sum of actual timeout waits that led to retransmit
         self._hs_start_ns: int = 0
         self._hs_end_ns: int = 0
 
@@ -144,6 +150,11 @@ class Gateway:
     @property
     def handshake_retransmit_count(self) -> int:
         return self._hs_retransmits
+
+    @property
+    def handshake_retransmit_wait_ns(self) -> int:
+        """Total ns actually waited on timeouts that led to retransmits."""
+        return self._hs_retransmit_wait_ns
 
     @property
     def handshake_duration_ns(self) -> int:
@@ -203,18 +214,22 @@ class Gateway:
         are ignored and not fatal (§15 item 22: duplicates/unexpected ignored).
         """
         self._hs_start_ns = time.perf_counter_ns()
-        initiator = HandshakeInitiator(self._suite, self._identity)
+        initiator = HandshakeInitiator(self._suite, self._identity, crypto_hook=self._crypto_hook)
         hello_i = initiator.start()
         loop = asyncio.get_running_loop()
 
         # --- HELLO_I retransmit loop (wait for HELLO_R) ---
         hello_r_body: Optional[bytes] = None
+        _attempt_start_ns: int = 0
         for attempt in range(self._hs_max_retries + 1):
             await self._link.send(bytes([_T_HELLO_I]) + hello_i)
             if attempt > 0:
                 self._hs_retransmits += 1
+                # Record the wait from the previous attempt's timeout
+                self._hs_retransmit_wait_ns += time.perf_counter_ns() - _attempt_start_ns
                 log.debug("Gateway: retransmit HELLO_I attempt %d", attempt)
             timeout_s = (self._hs_timeout_ms / 1000.0) * (2 ** attempt)
+            _attempt_start_ns = time.perf_counter_ns()
             deadline = loop.time() + timeout_s
             # Inner loop: drain unexpected HS messages until we get HELLO_R or deadline
             while True:
@@ -256,12 +271,15 @@ class Gateway:
         # --- FINISHED_I retransmit loop (wait for FINISHED_R) ---
         finished_r_body: Optional[bytes] = None
         try:
+            _fattempt_start_ns: int = 0
             for attempt in range(self._hs_max_retries + 1):
                 await self._link.send(bytes([_T_FINISHED_I]) + finished_i)
                 if attempt > 0:
                     self._hs_retransmits += 1
+                    self._hs_retransmit_wait_ns += time.perf_counter_ns() - _fattempt_start_ns
                     log.debug("Gateway: retransmit FINISHED_I attempt %d", attempt)
                 timeout_s = (self._hs_timeout_ms / 1000.0) * (2 ** attempt)
+                _fattempt_start_ns = time.perf_counter_ns()
                 deadline = loop.time() + timeout_s
                 while True:
                     remaining = deadline - loop.time()
@@ -331,6 +349,7 @@ class Gateway:
     async def send_frame(self, frame: CANFrame) -> None:
         """Encode → seal → send.  On CounterExhausted: buffer + send REKEY_REQ."""
         assert self._sm is not None
+        ingest_ns = time.perf_counter_ns()  # CAN ingest timestamp (§8, plan step 6)
         encoded = MessageAdapter.encode(frame)
         try:
             wire = self._sm.seal(encoded)
@@ -346,6 +365,13 @@ class Gateway:
         except AlertError as exc:
             log.error("Gateway: AlertError sealing frame: %s", exc)
             raise
+        # Wire: 1-byte prefix + 16-byte record header + ciphertext
+        # Header layout: vt(1) session_id(4) epoch(1) counter(8 BE) payload_len(2)
+        if self._latency_tracker is not None and len(wire) >= 15:
+            sid = int.from_bytes(wire[1:5], "big")
+            epoch = wire[5]
+            counter = int.from_bytes(wire[6:14], "big")
+            self._latency_tracker.record_ingest(sid, epoch, counter, ingest_ns)
         await self._link.send(bytes([_T_DATA]) + wire)
         self._records_sealed += 1
         self._bytes_sealed += len(encoded)

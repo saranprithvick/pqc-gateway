@@ -40,6 +40,7 @@ from pqcgw.legacy.can_model import CANFrame
 from pqcgw.net.link import Link
 from pqcgw.nodes.adapter import MessageAdapter
 from pqcgw.protocol.handshake import HandshakeError, HandshakeResponder, IdentityContext
+from pqcgw.protocol.hooks import CryptoHook, NullCryptoHook
 from pqcgw.protocol.messages import HelloI
 from pqcgw.protocol.record import Direction, RecordError, RecordLayer, RecordType
 from pqcgw.protocol.replay import ReplayWindow
@@ -74,6 +75,8 @@ class ModernPeer:
         sink: "asyncio.Queue[CANFrame]",
         rekey_config: Optional[RekeyConfig] = None,
         handshake_recv_timeout: float = 30.0,
+        crypto_hook: Optional[CryptoHook] = None,
+        latency_tracker: Optional[object] = None,
     ) -> None:
         self._suite = suite
         self._identity = identity
@@ -81,6 +84,8 @@ class ModernPeer:
         self._sink = sink
         self._rekey_config = rekey_config
         self._hs_recv_timeout = handshake_recv_timeout
+        self._crypto_hook: CryptoHook = crypto_hook if crypto_hook is not None else NullCryptoHook()
+        self._latency_tracker = latency_tracker
 
         self._sm: Optional[SessionManager] = None
 
@@ -136,7 +141,7 @@ class ModernPeer:
         silently ignored (not fatal) until timeout.
         """
         self._hs_start_ns = time.perf_counter_ns()
-        responder = HandshakeResponder(self._suite, self._identity)
+        responder = HandshakeResponder(self._suite, self._identity, crypto_hook=self._crypto_hook)
 
         # --- HELLO_I: loop until correct type or timeout (§15 item 22) ---
         hello_i_body: Optional[bytes] = None
@@ -260,6 +265,12 @@ class ModernPeer:
         if rtype == RecordType.DATA:
             try:
                 frame = MessageAdapter.decode(payload)
+                # Record delivery timestamp before putting to sink (§8, plan step 6)
+                if self._latency_tracker is not None and len(wire) >= 14:
+                    sid = int.from_bytes(wire[1:5], "big")
+                    epoch = wire[5]
+                    counter = int.from_bytes(wire[6:14], "big")
+                    self._latency_tracker.record_deliver(sid, epoch, counter, time.perf_counter_ns())
                 await self._sink.put(frame)
             except ValueError as exc:
                 log.warning("Peer: malformed I2R payload: %s", exc)

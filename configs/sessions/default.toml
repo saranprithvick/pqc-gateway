@@ -1,0 +1,17 @@
+# Default session and rekey configuration
+# Matches CLAUDE.md §5.7 / §15 items 10, 21 defaults.
+
+[rekey_config]
+counter_hard_limit = 4294967296   # 2^32
+max_consecutive_auth_failures = 10
+grace_period_s = 2.0
+grace_period_records = 64
+rekey_timeout_ms = 400
+rekey_max_retries = 3
+
+[rekey_trigger]
+# All triggers default to 0 (disabled).
+# Set elapsed_s, record_count, or byte_count to a non-zero value to enable.
+elapsed_s = 0.0
+record_count = 0
+byte_count = 0

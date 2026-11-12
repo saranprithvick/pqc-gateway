@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from pqcgw.crypto.registry import Suite
+from pqcgw.protocol.hooks import CryptoHook, NullCryptoHook
 from pqcgw.protocol.keyschedule import SessionKeys, derive_session_keys, suite_hash
 from pqcgw.protocol.messages import HelloI, HelloR
 
@@ -77,9 +78,15 @@ class HandshakeInitiator:
     States: IDLE → HELLO_SENT → KEYS_DERIVED → ESTABLISHED | FAILED
     """
 
-    def __init__(self, suite: Suite, identity: IdentityContext) -> None:
+    def __init__(
+        self,
+        suite: Suite,
+        identity: IdentityContext,
+        crypto_hook: Optional[CryptoHook] = None,
+    ) -> None:
         self._suite = suite
         self._identity = identity
+        self._hook: CryptoHook = crypto_hook if crypto_hook is not None else NullCryptoHook()
         self._state = "IDLE"
         self._session_id: Optional[bytes] = None
         self._kem_sk: Optional[bytes] = None
@@ -107,7 +114,9 @@ class HandshakeInitiator:
 
         session_id = os.urandom(4)
         nonce_i = os.urandom(32)
+        t0 = self._hook.before_crypto("kem_keygen")
         kem_pk, kem_sk = self._suite.kem.keygen()
+        self._hook.after_crypto("kem_keygen", t0)
 
         msg = HelloI(
             version=_PROTOCOL_VERSION,
@@ -119,10 +128,12 @@ class HandshakeInitiator:
             kem_pk=kem_pk,
         )
         body = msg.body_bytes()
+        t0 = self._hook.before_crypto("sign")
         sig = self._suite.signature.sign(
             self._identity.my_sk,
             b"hs-v1-I" + self._hash_fn(body).digest(),
         )
+        self._hook.after_crypto("sign", t0)
         msg.sig = sig
         hello_i_bytes = msg.to_bytes()
 
@@ -156,14 +167,19 @@ class HandshakeInitiator:
             b"hs-v1-R"
             + self._hash_fn(self._hello_i_bytes + hello_r_body).digest()
         )
-        if not self._suite.signature.verify(
+        t0 = self._hook.before_crypto("verify")
+        ok = self._suite.signature.verify(
             self._identity.peer_pk, expected_sig_input, msg.sig
-        ):
+        )
+        self._hook.after_crypto("verify", t0)
+        if not ok:
             self._fail("HELLO_R signature verification failed")
 
         # Decapsulate
         try:
+            t0 = self._hook.before_crypto("decaps")
             ss = self._suite.kem.decaps(self._kem_sk, msg.kem_ct)
+            self._hook.after_crypto("decaps", t0)
         except Exception as exc:
             self._fail(f"KEM decapsulation failed: {exc}")
 
@@ -171,9 +187,11 @@ class HandshakeInitiator:
         hello_r_bytes = data
         th = self._hash_fn(self._hello_i_bytes + hello_r_bytes).digest()
         self._th = th
+        t0 = self._hook.before_crypto("kdf")
         self._keys = derive_session_keys(
             self._suite, ss, self._nonce_i, msg.nonce_r, th
         )
+        self._hook.after_crypto("kdf", t0)
 
         # FINISHED_I = HMAC(k_finished, "I" || th)  §15 item 14
         finished_i = _hmac_digest(
@@ -223,9 +241,15 @@ class HandshakeResponder:
     HELLO_I without re-encapsulation or re-signing.
     """
 
-    def __init__(self, suite: Suite, identity: IdentityContext) -> None:
+    def __init__(
+        self,
+        suite: Suite,
+        identity: IdentityContext,
+        crypto_hook: Optional[CryptoHook] = None,
+    ) -> None:
         self._suite = suite
         self._identity = identity
+        self._hook: CryptoHook = crypto_hook if crypto_hook is not None else NullCryptoHook()
         self._state = "IDLE"
         self._session_id: Optional[bytes] = None
         self._ss: Optional[bytes] = None
@@ -268,9 +292,12 @@ class HandshakeResponder:
         # Verify sig_I: Sign(sk_gateway, "hs-v1-I" || H(body_bytes))
         body = msg.body_bytes()
         expected_sig_input = b"hs-v1-I" + self._hash_fn(body).digest()
-        if not self._suite.signature.verify(
+        t0 = self._hook.before_crypto("verify")
+        ok = self._suite.signature.verify(
             self._identity.peer_pk, expected_sig_input, msg.sig
-        ):
+        )
+        self._hook.after_crypto("verify", t0)
+        if not ok:
             self._fail("HELLO_I signature verification failed")
 
         # Cache check (§15 item 9): resend byte-identical HELLO_R on duplicate
@@ -282,7 +309,9 @@ class HandshakeResponder:
 
         # Encapsulate to initiator's KEM public key
         try:
+            t0 = self._hook.before_crypto("encaps")
             kem_ct, ss = self._suite.kem.encaps(msg.kem_pk)
+            self._hook.after_crypto("encaps", t0)
         except Exception as exc:
             self._fail(f"KEM encapsulation failed: {exc}")
 
@@ -296,10 +325,12 @@ class HandshakeResponder:
             kem_ct=kem_ct,
         )
         hello_r_body = hello_r_msg.body_bytes()
+        t0 = self._hook.before_crypto("sign")
         sig_r = self._suite.signature.sign(
             self._identity.my_sk,
             b"hs-v1-R" + self._hash_fn(data + hello_r_body).digest(),
         )
+        self._hook.after_crypto("sign", t0)
         hello_r_msg.sig = sig_r
         hello_r_bytes = hello_r_msg.to_bytes()
 
@@ -321,9 +352,11 @@ class HandshakeResponder:
             raise HandshakeError(f"process_finished_i() called in state {self._state}")
 
         th = self._hash_fn(self._hello_i_bytes + self._hello_r_bytes).digest()
+        t0 = self._hook.before_crypto("kdf")
         keys = derive_session_keys(
             self._suite, self._ss, self._nonce_i, self._nonce_r, th
         )
+        self._hook.after_crypto("kdf", t0)
 
         # Verify FINISHED_I = HMAC(k_finished, "I" || th)  §15 item 14
         if not _hmac_verify(keys.k_finished, b"I" + th, data, self._hash_fn):
