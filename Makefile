@@ -1,4 +1,4 @@
-.PHONY: setup test smoke
+.PHONY: setup test smoke bench
 
 # Point liboqs-python at the project-local liboqs build for every target.
 # This is picked up at Python import time by oqs/oqs.py (OQS_INSTALL_PATH search).
@@ -16,3 +16,18 @@ test:
 
 smoke:
 	.venv/bin/pytest tests/test_smoke.py -v -s
+
+bench:
+	@mkdir -p results/raw results/tables results/figures
+	@echo "--- Micro-benchmarks ---"
+	.venv/bin/python -m pqcgw.bench.micro
+	@echo "--- End-to-end benchmarks ---"
+	.venv/bin/python -m pqcgw.bench.e2e
+	@echo "--- Analytical: bus_time ---"
+	.venv/bin/python -m pqcgw.bench.analytical.bus_time
+	@echo "--- Analytical: contact_window ---"
+	.venv/bin/python -m pqcgw.bench.analytical.contact_window
+	@echo "--- Analytical: beacon_cost ---"
+	.venv/bin/python -m pqcgw.bench.analytical.beacon_cost
+	@echo "--- Plots ---"
+	.venv/bin/python scripts/make_plots.py
