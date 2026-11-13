@@ -396,7 +396,10 @@ async def _run_throughput(
     peer_link = emulator.peer_half
     sink: asyncio.Queue[CANFrame] = asyncio.Queue()
 
-    with CanAdapter(chan) as can:
+    # Use a SEPARATE injector adapter: the virtual bus does NOT echo sends
+    # back to the sender, so frames must come from a different connection.
+    injector_chan = chan
+    with CanAdapter(chan) as can, CanAdapter(injector_chan) as injector:
         gw = Gateway(suite, gw_id, can, gw_link)
         peer = ModernPeer(suite, peer_id, peer_link, sink)
         _gw_hs = asyncio.create_task(gw.handshake())
@@ -410,11 +413,12 @@ async def _run_throughput(
         gw_task = asyncio.create_task(gw.run(n_frames=n_frames))
         peer_task = asyncio.create_task(peer.run(n_frames=n_frames))
 
-        # Inject frames as fast as possible (throughput saturation)
+        # Inject frames as fast as possible (throughput saturation).
+        # injector is a separate adapter so the gateway's bus receives them.
         for i in range(n_frames):
             frame = CANFrame(can_id=0x100, dlc=_FRAME_DLC,
                              data=bytes([i % 256] * _FRAME_DLC))
-            can.send(frame)
+            injector.send(frame)
 
         await asyncio.wait_for(
             asyncio.gather(gw_task, peer_task),
@@ -494,7 +498,13 @@ def run_throughput_memory(config: str, profile: str, env: dict) -> None:
 # ---------------------------------------------------------------------------
 
 async def _measure_light_rekey(suite_name: str, net_cfg: NetworkConfig, chan: str) -> dict:
-    """Measure one light-rekey round-trip (time, bytes exchanged)."""
+    """Measure one light-rekey round-trip (time from request to epoch change).
+
+    The gateway and peer run loops must remain active during the rekey so that
+    REKEY_REQ and REKEY_ACK can be exchanged.  We start them indefinitely, prime
+    the data phase with one frame, then trigger a manual light rekey and poll for
+    the epoch increment.  Both loops are cancelled after the measurement.
+    """
     suite = load_suite(_SUITE_DIR / f"{suite_name}.toml")
     gw_id, peer_id = _make_identities(suite)
 
@@ -513,28 +523,36 @@ async def _measure_light_rekey(suite_name: str, net_cfg: NetworkConfig, chan: st
         _peer_hs = asyncio.create_task(peer.handshake())
         await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=10.0)
 
-        # Send one frame to establish data phase
-        can.send(CANFrame(can_id=0x100, dlc=8, data=b"\x00" * 8))
-        gw_run = asyncio.create_task(gw.run(n_frames=1))
-        peer_run = asyncio.create_task(peer.run(n_frames=1))
-        await asyncio.wait_for(asyncio.gather(gw_run, peer_run), timeout=5.0)
+        # Keep run loops alive during the rekey measurement
+        gw_run = asyncio.create_task(gw.run(n_frames=None))
+        peer_run = asyncio.create_task(peer.run(n_frames=None))
 
-        # Trigger and time light rekey
+        # Prime the data phase with one frame
+        can.send(CANFrame(can_id=0x100, dlc=8, data=b"\x00" * 8))
+        await asyncio.sleep(0.1)  # let the frame be processed
+
+        # Trigger and time light rekey (loop is running, will process it next iteration)
+        old_epoch = gw._sm.epoch if gw._sm else 0
         t0 = time.perf_counter_ns()
         gw.request_light_rekey()
-        # Drive until rekey is complete (epoch changes)
-        old_epoch = gw._sm.epoch if gw._sm else 0
-        for _ in range(100):
+
+        # Poll for epoch change (gateway loop runs every ~20 ms)
+        for _ in range(300):
             await asyncio.sleep(0.01)
             if gw._sm and gw._sm.epoch != old_epoch:
                 break
 
         t1 = time.perf_counter_ns()
+        new_epoch = gw._sm.epoch if gw._sm else -1
+
+        gw_run.cancel()
+        peer_run.cancel()
+        await asyncio.gather(gw_run, peer_run, return_exceptions=True)
 
     return {
         "rekey_time_ns": t1 - t0,
         "epoch_before": old_epoch,
-        "epoch_after": gw._sm.epoch if gw._sm else -1,
+        "epoch_after": new_epoch,
     }
 
 
@@ -578,7 +596,7 @@ async def _run_rekey_sweep_trial(
     rekey_trig = RekeyTrigger(record_count=interval)
     rekey_cfg = RekeyConfig(rekey_timeout_ms=400, rekey_max_retries=3)
 
-    with CanAdapter(chan) as can:
+    with CanAdapter(chan) as can, CanAdapter(chan) as injector:
         gw = Gateway(suite, gw_id, can, gw_link,
                      rekey_config=rekey_cfg, trigger=rekey_trig)
         peer = ModernPeer(suite, peer_id, peer_link, sink, rekey_config=rekey_cfg)
@@ -586,12 +604,13 @@ async def _run_rekey_sweep_trial(
         _peer_hs = asyncio.create_task(peer.handshake())
         await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=10.0)
 
-        for i in range(n_frames):
-            can.send(CANFrame(can_id=0x100, dlc=_FRAME_DLC,
-                              data=bytes([i % 256] * _FRAME_DLC)))
         gw_task = asyncio.create_task(gw.run(n_frames=n_frames))
         peer_task = asyncio.create_task(peer.run(n_frames=n_frames))
-        await asyncio.wait_for(asyncio.gather(gw_task, peer_task), timeout=60.0)
+        # Inject via a separate adapter so the gateway's bus receives them.
+        for i in range(n_frames):
+            injector.send(CANFrame(can_id=0x100, dlc=_FRAME_DLC,
+                                   data=bytes([i % 256] * _FRAME_DLC)))
+        await asyncio.wait_for(asyncio.gather(gw_task, peer_task), timeout=120.0)
 
     return {
         "rekey_count": (gw._sm.epoch if gw._sm else 0),
