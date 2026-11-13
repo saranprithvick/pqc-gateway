@@ -12,7 +12,7 @@
 | M5a | DONE | 226 tests pass. Branch m5a-integration merged to main (2453bbd). Milestone logs written. |
 | M5b | DONE | 239 tests pass. Branch m5b-rekey-link (3 commits: m5b-01-proto, m5b-02-stack, m5b-03-tests). Merge to main pending approval. |
 | M6 | DONE | 333 non-slow tests pass (118 security + 13 agility + 202 unit/smoke). Branch m6-security-agility. |
-| M7 | Not started | |
+| M7 | DONE | Benchmark harness complete. 795 tests pass. Branch m7-benchmarks. All tables and figures in results/. |
 | M8 | Not started | |
 
 ## Decisions made
@@ -53,8 +53,34 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M6 complete (2026-11-11). 333 non-slow tests pass on branch m6-security-agility.
-Pending: user approval to merge m6-security-agility to main, tag m6-done, then start M7 (benchmark harness, network profiles, analytical scripts, results tables and plots).
+M7 complete (2026-11-13). 795 tests pass on branch m7-benchmarks.
+Pending: user approval to merge m7-benchmarks to main and tag m7-done.
+Then start M8: README, docs/PROTOCOL.md, THREAT_MODEL.md, LIMITATIONS.md, results summary tables.
+
+## M7 deliverables (commits m7-01 through m7-09, 2026-11-13)
+
+**Benchmark harness** (`src/pqcgw/bench/`):
+- `micro.py` — per-primitive micro-benchmarks (keygen/encaps/decaps/sign/verify/KDF/AEAD); ≥1000 reps after 50 warm-up; median/p95/p99; environment metadata in every CSV.
+- `e2e.py` — end-to-end: sub-run A (handshake), B (latency), C (throughput+memory), D (rekey cost + sweep); C0–C3 × 7 network profiles; injector-adapter pattern to work around python-can virtual bus no-echo; loss profiles use asyncio.TimeoutError to collect partial results.
+- `metrics.py` — `write_csv`, `collect_env`, `measure_overhead` helpers.
+- `analytical/bus_time.py`, `contact_window.py`, `beacon_cost.py` — analytical scripts (clearly labelled "illustrative").
+
+**Scripts**: `scripts/make_plots.py` — 8 matplotlib figures from the CSV tables.
+
+**Key findings from M7 results**:
+- Latency (ideal): C1=0.26ms, C2=0.30ms, C3=0.18ms (hybrid slightly lower variance than PQC-only).
+- Throughput: 85–95 fps across all configs/profiles — network-bound, not crypto-bound.
+- Peak memory: C1~112 KiB, C2~174 KiB, C3~181 KiB (PQC adds ~54–62% memory).
+- Light rekey (ideal): ~32ms for all configs; scales with RTT (~2×RTT for delay profiles).
+- Light rekey under 5% loss: median 440ms for C3 (REKEY_REQ/ACK hit 400ms retransmit timeout).
+- Rekey sweep (C3/ideal): rekeys=1 for intervals 10–500 frames; rekeys=0 for 1000–5000 (never triggered).
+
+**Bugs fixed during M7**:
+- Virtual CAN bus no-echo: gateway's `can.send()` is never received by its own `can.recv()`. Fixed with separate injector CanAdapter in `_run_throughput` and `_run_rekey_sweep_trial`.
+- Loss profile hang: `peer.run(n_frames=N)` never completes when packets are lost. Fixed by catching `asyncio.TimeoutError` and returning partial results.
+- Light rekey measurement: `run(n_frames=1)` exits before rekey could process. Fixed with `run(n_frames=None)` background tasks.
+- Latency timeout too long for loss profiles: reduced from `max(30, n_frames/hz*2)` to `max(5, n_frames/hz+2)`.
+- overhead.csv duplicate rows: `run()` was appending on each invocation. Fixed with `unlink(missing_ok=True)` before writing.
 
 ## M5b deliverables (3 commits on m5b-rekey-link, 2026-11-09)
 
