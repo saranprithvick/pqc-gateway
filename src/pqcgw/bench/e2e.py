@@ -330,7 +330,7 @@ async def _run_latency(
         try:
             await asyncio.wait_for(
                 asyncio.gather(emit_task, gw_task, peer_task),
-                timeout=max(30.0, n_frames / rate_hz * 2),
+                timeout=max(5.0, n_frames / rate_hz + 2.0),
             )
         except asyncio.TimeoutError:
             # With packet loss the peer may never receive all n_frames.
