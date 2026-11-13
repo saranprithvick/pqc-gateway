@@ -1,14 +1,11 @@
-"""LegacyNode: simulated ECU that emits CAN frames on demand.
-
-Rate-driven timing and command forwarding are deferred to M7.  In M5a the
-node generates frames only when explicitly called.
-"""
+"""LegacyNode: simulated ECU that emits CAN frames on demand or at a fixed rate."""
 
 from __future__ import annotations
 
+import asyncio
 import random
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from pqcgw.legacy.can_adapter import CanAdapter
 from pqcgw.legacy.can_model import CANFrame, VALID_FD_LENGTHS
@@ -74,6 +71,44 @@ class LegacyNode:
         )
         self._adapter.send(frame)
         return frame
+
+    async def emit_loop(
+        self,
+        profile_idx: int,
+        rate_hz: float,
+        n_frames: int,
+        out_q: "asyncio.Queue[CANFrame]",
+        seq_offset: int = 0,
+    ) -> None:
+        """Emit exactly n_frames at a fixed rate on an absolute schedule.
+
+        Uses asyncio.get_event_loop().time() so scheduling noise is bounded
+        by the event loop granularity.  The first frame is sent immediately.
+        seq_offset is added to the frame counter so successive bench runs produce
+        distinct sequence numbers (useful for latency correlation in C0).
+
+        Args:
+            profile_idx: index into self._profiles
+            rate_hz: target emission rate
+            n_frames: total frames to emit
+            out_q: asyncio.Queue to put emitted CANFrame objects into
+            seq_offset: added to internal counter for sequence disambiguation
+        """
+        if not (0 <= profile_idx < len(self._profiles)):
+            raise IndexError(f"profile_idx {profile_idx} out of range")
+        period = 1.0 / rate_hz
+        loop = asyncio.get_event_loop()
+        start = loop.time()
+        old_counter = self._counters[profile_idx]
+        self._counters[profile_idx] = (old_counter + seq_offset) & 0xFF
+        for i in range(n_frames):
+            target = start + i * period
+            now = loop.time()
+            wait = target - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+            frame = self.emit_one(profile_idx)
+            await out_q.put(frame)
 
     # ------------------------------------------------------------------
 

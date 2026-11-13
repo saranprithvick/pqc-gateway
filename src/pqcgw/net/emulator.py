@@ -3,12 +3,15 @@
 Each direction (I2R and R2I) is an independent asyncio Task that:
   1. Accepts a message from the sender's queue.
   2. Fragments it to mtu_bytes.
-  3. For each fragment: applies loss, then delay (delay_ms ± jitter_ms, clamped ≥ 0).
-  4. Pushes surviving fragments to the receiver's reassembler queue.
-  5. Receiver reassembles fragments before making messages available via recv().
+  3. For each fragment: applies bandwidth serialisation (synchronous, keeps wire order),
+     then loss, then feeds to the reassembler.
+  4. When a message is fully reassembled, its propagation delay is applied via an
+     asyncio task (pipelined: all messages in a direction experience delay
+     concurrently, so 100 messages sent at once all arrive ≈ delay_ms later).
+  5. link_ns_acc accumulates (delay + serialisation) per DELIVERED message for
+     benchmark crypto/link time decomposition.
 
 Handshake retransmission is NOT handled here; the Gateway/Peer retransmit on timeout.
-Reorder and bandwidth cap are deferred to M7.
 
 Each make_pair() call gets its own seeded random.Random, so simulations are
 reproducible (all non-cryptographic randomness takes a seed from config, per CLAUDE.md §2.7).
@@ -90,9 +93,12 @@ class LinkEmulator:
     def __init__(self, config: NetworkConfig) -> None:
         self._config = config
         self._rng = random.Random(config.seed)
-        # I2R counters
+        # Fragment counters (mutable list so tasks can share the ref)
         self._frags_i2r: list[int] = [0]
         self._frags_r2i: list[int] = [0]
+        # Link-delay accumulators (ns per delivered message, for benchmark decomposition)
+        self._link_ns_i2r: list[int] = [0]
+        self._link_ns_r2i: list[int] = [0]
         # Queues: gw_send → impair_i2r → peer_recv; peer_send → impair_r2i → gw_recv
         self._gw_send: asyncio.Queue[bytes] = asyncio.Queue()
         self._peer_recv: asyncio.Queue[bytes] = asyncio.Queue()
@@ -104,7 +110,6 @@ class LinkEmulator:
         # Tasks started lazily
         self._tasks: list[asyncio.Task] = []
         self._started = False
-        self._msg_counter = 0  # global message-id counter
 
     @property
     def fragments_sent_i2r(self) -> int:
@@ -113,6 +118,21 @@ class LinkEmulator:
     @property
     def fragments_sent_r2i(self) -> int:
         return self._frags_r2i[0]
+
+    @property
+    def handshake_link_ns_i2r(self) -> int:
+        """Accumulated (delay + serialisation) ns for all delivered I2R messages."""
+        return self._link_ns_i2r[0]
+
+    @property
+    def handshake_link_ns_r2i(self) -> int:
+        """Accumulated (delay + serialisation) ns for all delivered R2I messages."""
+        return self._link_ns_r2i[0]
+
+    def reset_link_ns(self) -> None:
+        """Zero the link-ns accumulators (call before the phase you want to measure)."""
+        self._link_ns_i2r[0] = 0
+        self._link_ns_r2i[0] = 0
 
     @property
     def gateway_half(self) -> Link:
@@ -128,20 +148,21 @@ class LinkEmulator:
         if self._started:
             return
         self._started = True
-        self._tasks.append(asyncio.get_event_loop().create_task(
+        loop = asyncio.get_event_loop()
+        self._tasks.append(loop.create_task(
             self._impair_direction(
                 in_q=self._gw_send,
                 out_q=self._peer_recv,
                 counter=self._frags_i2r,
-                direction="I2R",
+                link_ns_acc=self._link_ns_i2r,
             )
         ))
-        self._tasks.append(asyncio.get_event_loop().create_task(
+        self._tasks.append(loop.create_task(
             self._impair_direction(
                 in_q=self._peer_send,
                 out_q=self._gw_recv,
                 counter=self._frags_r2i,
-                direction="R2I",
+                link_ns_acc=self._link_ns_r2i,
             )
         ))
 
@@ -150,7 +171,7 @@ class LinkEmulator:
         in_q: asyncio.Queue,
         out_q: asyncio.Queue,
         counter: list[int],
-        direction: str,
+        link_ns_acc: list[int],
     ) -> None:
         reassembler = Reassembler()
         rng = random.Random(self._rng.random())  # per-direction seeded sub-RNG
@@ -160,21 +181,37 @@ class LinkEmulator:
             frags = fragment(msg_id_gen & 0xFFFFFFFF, msg, self._config.mtu_bytes)
             msg_id_gen += 1
             counter[0] += len(frags)
+            msg_serialise_ns = 0
             for frag_bytes in frags:
+                # Bandwidth serialisation (synchronous — keeps wire ordering for this direction)
+                if self._config.bandwidth_kbps > 0:
+                    serialise_s = len(frag_bytes) * 8 / (self._config.bandwidth_kbps * 1000.0)
+                    msg_serialise_ns += int(serialise_s * 1e9)
+                    await asyncio.sleep(serialise_s)
                 # Loss
                 if self._config.loss_pct > 0 and rng.random() * 100 < self._config.loss_pct:
                     continue  # drop this fragment
-                # Delay
-                delay_s = self._config.delay_ms / 1000.0
-                if self._config.jitter_ms > 0:
-                    delay_s += rng.uniform(-self._config.jitter_ms, self._config.jitter_ms) / 1000.0
-                delay_s = max(0.0, delay_s)
-                if delay_s > 0:
-                    await asyncio.sleep(delay_s)
                 # Feed to reassembler; deliver when complete
                 result = reassembler.feed(frag_bytes)
                 if result is not None:
-                    await out_q.put(result)
+                    # Propagation delay (pipelined — does not block this loop)
+                    delay_s = self._config.delay_ms / 1000.0
+                    if self._config.jitter_ms > 0:
+                        delay_s += rng.uniform(
+                            -self._config.jitter_ms, self._config.jitter_ms
+                        ) / 1000.0
+                    delay_s = max(0.0, delay_s)
+                    link_ns_acc[0] += int(delay_s * 1e9) + msg_serialise_ns
+                    if delay_s > 0:
+                        loop = asyncio.get_running_loop()
+                        # Capture loop-locals by default-arg to avoid closure-over-loop issues
+                        async def _deliver(d: float = delay_s, m: bytes = result, q: asyncio.Queue = out_q) -> None:
+                            await asyncio.sleep(d)
+                            await q.put(m)
+                        loop.create_task(_deliver())
+                    else:
+                        await out_q.put(result)
+                    msg_serialise_ns = 0  # reset per message
 
     async def _send_gw(self, msg: bytes) -> None:
         self._start()

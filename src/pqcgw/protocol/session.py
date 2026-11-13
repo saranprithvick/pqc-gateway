@@ -33,6 +33,12 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from pqcgw.crypto.registry import Suite
 from pqcgw.protocol.keyschedule import SessionKeys
@@ -60,12 +66,23 @@ class RekeyTrigger:
     """Config for automatic rekey triggers in the Gateway run loop.
 
     All fields default to 0 (disabled).  Values are loadable from TOML config
-    by M7 (e.g. configs/sessions/default.toml).
+    (e.g. configs/sessions/default.toml).
     """
 
     interval_s: float = 0.0    # trigger after this many seconds (0 = off)
     record_count: int = 0       # trigger after this many records sealed (0 = off)
     byte_count: int = 0         # trigger after this many payload bytes sealed (0 = off)
+
+    @classmethod
+    def from_toml(cls, path: Path) -> "RekeyTrigger":
+        with open(path, "rb") as fh:
+            d = tomllib.load(fh)
+        t = d.get("rekey_trigger", d)  # support [rekey_trigger] table or top-level
+        return cls(
+            interval_s=float(t.get("elapsed_s", t.get("interval_s", 0.0))),
+            record_count=int(t.get("record_count", 0)),
+            byte_count=int(t.get("byte_count", 0)),
+        )
 
 
 @dataclass
@@ -102,6 +119,20 @@ class RekeyConfig:
                     f"must be strictly less than grace_period_s={self.grace_period_s}. "
                     f"Increase grace_period_s or reduce rekey_timeout_ms/rekey_max_retries."
                 )
+
+    @classmethod
+    def from_toml(cls, path: Path) -> "RekeyConfig":
+        with open(path, "rb") as fh:
+            d = tomllib.load(fh)
+        c = d.get("rekey_config", d)  # support [rekey_config] table or top-level
+        return cls(
+            counter_hard_limit=int(c.get("counter_hard_limit", 2 ** 32)),
+            max_consecutive_auth_failures=int(c.get("max_consecutive_auth_failures", 10)),
+            grace_period_s=float(c.get("grace_period_s", 2.0)),
+            grace_period_records=int(c.get("grace_period_records", 64)),
+            rekey_timeout_ms=int(c.get("rekey_timeout_ms", 400)),
+            rekey_max_retries=int(c.get("rekey_max_retries", 3)),
+        )
 
 
 # ---------------------------------------------------------------------------
