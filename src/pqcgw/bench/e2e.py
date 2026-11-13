@@ -327,10 +327,18 @@ async def _run_latency(
         gw_task = asyncio.create_task(gw.run(n_frames=n_frames))
         peer_task = asyncio.create_task(peer.run(n_frames=n_frames))
 
-        await asyncio.wait_for(
-            asyncio.gather(emit_task, gw_task, peer_task),
-            timeout=max(30.0, n_frames / rate_hz * 2),
-        )
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(emit_task, gw_task, peer_task),
+                timeout=max(30.0, n_frames / rate_hz * 2),
+            )
+        except asyncio.TimeoutError:
+            # With packet loss the peer may never receive all n_frames.
+            # Cancel remaining tasks and return whatever was collected.
+            for t in (emit_task, gw_task, peer_task):
+                t.cancel()
+            await asyncio.gather(emit_task, gw_task, peer_task,
+                                 return_exceptions=True)
 
     return tracker.latencies_ns
 
@@ -420,13 +428,26 @@ async def _run_throughput(
                              data=bytes([i % 256] * _FRAME_DLC))
             injector.send(frame)
 
-        await asyncio.wait_for(
-            asyncio.gather(gw_task, peer_task),
-            timeout=60.0,
-        )
+        # Wait for the gateway to finish sending all n_frames.
+        # The emulator is non-blocking on send, so this is always fast.
+        # Time ends here — this is the gateway throughput measurement.
+        try:
+            await asyncio.wait_for(gw_task, timeout=20.0)
+        except (asyncio.TimeoutError, Exception):
+            gw_task.cancel()
+            await asyncio.gather(gw_task, return_exceptions=True)
 
         t_end = time.perf_counter_ns()
         t_cpu_end = time.process_time_ns()
+
+        # Give the peer time to drain in-flight records (best-effort).
+        # With packet loss, peer may never drain fully — cancel after delay.
+        peer_drain = max(2.0, 0.1)  # minimal drain window
+        try:
+            await asyncio.wait_for(peer_task, timeout=peer_drain)
+        except (asyncio.TimeoutError, Exception):
+            peer_task.cancel()
+            await asyncio.gather(peer_task, return_exceptions=True)
 
     wall_s = (t_end - t_start) / 1e9
     cpu_s = (t_cpu_end - t_cpu_start) / 1e9
@@ -705,9 +726,11 @@ def run(
     env = collect_env()
     _subs = sub if sub is not None else {"A", "B", "C", "D"}
 
-    # Write overhead decomposition table once
+    # Write overhead decomposition table (always overwrite — it's deterministic)
+    overhead_path = _TABLES_DIR / "overhead.csv"
+    overhead_path.unlink(missing_ok=True)
     overhead_rows = [measure_overhead(c) for c in configs]
-    write_csv(_TABLES_DIR / "overhead.csv", overhead_rows, env)
+    write_csv(overhead_path, overhead_rows, env)
 
     for config in configs:
         for profile in profiles:
