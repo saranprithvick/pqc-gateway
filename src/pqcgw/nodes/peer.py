@@ -382,8 +382,10 @@ class ModernPeer:
         commands: R2I frames sent to the Gateway after the session is established.
         n_frames: how many I2R DATA frames to receive before returning.
                   None means run indefinitely (until cancelled).
+        If handshake() was already called on this instance, skip it here.
         """
-        await self.handshake()
+        if self._sm is None:
+            await self.handshake()
 
         if commands:
             for cmd in commands:

@@ -35,7 +35,7 @@ import tracemalloc
 from pathlib import Path
 from typing import Optional
 
-_SRC = Path(__file__).resolve().parents[4] / "src"
+_SRC = Path(__file__).resolve().parents[3] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
@@ -60,7 +60,7 @@ from pqcgw.nodes.peer import ModernPeer
 from pqcgw.protocol.handshake import IdentityContext
 from pqcgw.protocol.session import RekeyConfig, RekeyTrigger
 
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 _SUITE_DIR = _ROOT / "configs" / "suites"
 _NET_DIR = _ROOT / "configs" / "network"
 _RAW_DIR = _ROOT / "results" / "raw"
@@ -114,8 +114,8 @@ def _net_config(profile: str, seed: int = 42) -> NetworkConfig:
 
 def _make_identities(suite):
     sig = suite.signature
-    gw_sk, gw_pk = sig.keygen()
-    peer_sk, peer_pk = sig.keygen()
+    gw_pk, gw_sk = sig.keygen()
+    peer_pk, peer_sk = sig.keygen()
     gw_id = IdentityContext(
         my_id="gw", peer_id="peer",
         my_sk=gw_sk, my_pk=gw_pk, peer_pk=peer_pk,
@@ -267,8 +267,8 @@ def run_handshake_trials(
             "config": config, "profile": profile,
             "n_trials": n_trials, "n_success": len(rows), "n_fail": failures,
             "success_rate": success_rate,
-            **({k: v for k, v in compute_stats(wall_samples).as_dict("wall_")} if len(rows) >= 50 else {}),
-            **({k: v for k, v in compute_stats(crypto_samples).as_dict("crypto_")} if len(rows) >= 50 else {}),
+            **(compute_stats(wall_samples).as_dict("wall_") if len(rows) >= 50 else {}),
+            **(compute_stats(crypto_samples).as_dict("crypto_") if len(rows) >= 50 else {}),
         }]
         write_csv(_TABLES_DIR / "handshake.csv", summary, env)
         write_csv(_RAW_DIR / f"handshake_{config}_{profile}.csv", rows, env)
@@ -311,7 +311,9 @@ async def _run_latency(
         )
 
         # Handshake
-        await asyncio.gather(gw.handshake(), peer.handshake())
+        _gw_hs = asyncio.create_task(gw.handshake())
+        _peer_hs = asyncio.create_task(peer.handshake())
+        await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=10.0)
 
         # Emit frames at scenario rate
         profile = TrafficProfile(can_id=0x100, rate_hz=rate_hz, dlc=_FRAME_DLC,
@@ -397,7 +399,9 @@ async def _run_throughput(
     with CanAdapter(chan) as can:
         gw = Gateway(suite, gw_id, can, gw_link)
         peer = ModernPeer(suite, peer_id, peer_link, sink)
-        await asyncio.gather(gw.handshake(), peer.handshake())
+        _gw_hs = asyncio.create_task(gw.handshake())
+        _peer_hs = asyncio.create_task(peer.handshake())
+        await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=10.0)
 
         gc.collect()
         t_start = time.perf_counter_ns()
@@ -492,7 +496,9 @@ async def _measure_light_rekey(suite_name: str, net_cfg: NetworkConfig, chan: st
         gw = Gateway(suite, gw_id, can, gw_link, rekey_config=rekey_cfg)
         peer = ModernPeer(suite, peer_id, peer_link, sink, rekey_config=rekey_cfg)
 
-        await asyncio.gather(gw.handshake(), peer.handshake())
+        _gw_hs = asyncio.create_task(gw.handshake())
+        _peer_hs = asyncio.create_task(peer.handshake())
+        await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=10.0)
 
         # Send one frame to establish data phase
         can.send(CANFrame(can_id=0x100, dlc=8, data=b"\x00" * 8))

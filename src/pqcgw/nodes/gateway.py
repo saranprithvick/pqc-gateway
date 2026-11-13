@@ -520,8 +520,10 @@ class Gateway:
 
         n_frames: stop after forwarding this many I2R frames (for tests).
         Pass None to run indefinitely (until error).
+        If handshake() was already called on this instance, skip it here.
         """
-        await self.handshake()
+        if self._sm is None:
+            await self.handshake()
 
         self._hs_queue = asyncio.Queue()
         self._session_start = time.monotonic()

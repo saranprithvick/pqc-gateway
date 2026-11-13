@@ -42,7 +42,7 @@ import argparse
 import math
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[5]
+_ROOT = Path(__file__).resolve().parents[4]
 _RESULTS = _ROOT / "results" / "tables"
 
 

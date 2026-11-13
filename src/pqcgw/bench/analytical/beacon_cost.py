@@ -25,7 +25,7 @@ import csv
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[5]
+_ROOT = Path(__file__).resolve().parents[4]
 _RAW_DIR = _ROOT / "results" / "raw"
 _OUT_CSV = _ROOT / "results" / "tables" / "beacon_cost.csv"
 

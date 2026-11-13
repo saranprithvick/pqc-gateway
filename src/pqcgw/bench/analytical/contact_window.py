@@ -26,7 +26,7 @@ import csv
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[5]
+_ROOT = Path(__file__).resolve().parents[4]
 _HANDSHAKE_CSV = _ROOT / "results" / "tables" / "handshake.csv"
 _OUT_CSV = _ROOT / "results" / "tables" / "contact_window.csv"
 

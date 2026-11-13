@@ -29,14 +29,14 @@ import time
 from pathlib import Path
 
 # Ensure project root is on path when run as __main__
-_HERE = Path(__file__).resolve().parents[4]
+_HERE = Path(__file__).resolve().parents[3]
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE / "src"))
 
 from pqcgw.bench.metrics import SmallNStats, Stats, collect_env, compute_stats, compute_small_n_stats, write_csv
-from pqcgw.crypto.registry import REGISTRY
+from pqcgw.crypto.registry import load_suite
 
-_RESULTS_DIR = Path(__file__).resolve().parents[4] / "results" / "raw"
+_RESULTS_DIR = Path(__file__).resolve().parents[3] / "results" / "raw"
 _WARMUP = 50
 _N_ITER = 1000
 _PAYLOAD_SIZES = [8, 64, 256, 1024]  # bytes, for AEAD and KDF expand
@@ -53,7 +53,7 @@ def _time_loop(fn, n: int) -> list[int]:
 
 
 def bench_kem(suite_name: str, env: dict) -> None:
-    suite = REGISTRY.load(Path(__file__).resolve().parents[4] / "configs" / "suites" / f"{suite_name}.toml")
+    suite = load_suite(Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{suite_name}.toml")
     kem = suite.kem
     rows: list[dict] = []
 
@@ -67,7 +67,7 @@ def bench_kem(suite_name: str, env: dict) -> None:
     rows.append({"alg": suite_name, "op": "kem_keygen", "payload_bytes": 0, **st.as_dict(), **env})
 
     # encaps / decaps (need a fixed pk for encaps, sk for decaps)
-    pk, sk = kem.keygen()
+    pk, sk = kem.keygen()  # KEM.keygen() returns (pk, sk)
     ct, _ss = kem.encaps(pk)
 
     gc.collect()
@@ -92,7 +92,7 @@ def bench_kem(suite_name: str, env: dict) -> None:
 
 
 def bench_sig(suite_name: str, env: dict) -> None:
-    suite = REGISTRY.load(Path(__file__).resolve().parents[4] / "configs" / "suites" / f"{suite_name}.toml")
+    suite = load_suite(Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{suite_name}.toml")
     sig = suite.signature
     rows: list[dict] = []
     msg = os.urandom(64)  # fixed message for all sign/verify iterations
@@ -107,7 +107,7 @@ def bench_sig(suite_name: str, env: dict) -> None:
     rows.append({"alg": suite_name, "op": "sig_keygen", "payload_bytes": 0, **st.as_dict(), **env})
 
     # sign / verify
-    sk, pk = sig.keygen()
+    pk, sk = sig.keygen()
     signature = sig.sign(sk, msg)
 
     gc.collect()
@@ -132,7 +132,7 @@ def bench_sig(suite_name: str, env: dict) -> None:
 
 
 def bench_kdf(suite_name: str, env: dict) -> None:
-    suite = REGISTRY.load(Path(__file__).resolve().parents[4] / "configs" / "suites" / f"{suite_name}.toml")
+    suite = load_suite(Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{suite_name}.toml")
     kdf = suite.kdf
     rows: list[dict] = []
 
@@ -164,7 +164,7 @@ def bench_kdf(suite_name: str, env: dict) -> None:
 
 
 def bench_aead(suite_name: str, env: dict) -> None:
-    suite = REGISTRY.load(Path(__file__).resolve().parents[4] / "configs" / "suites" / f"{suite_name}.toml")
+    suite = load_suite(Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{suite_name}.toml")
     aead = suite.aead
     rows: list[dict] = []
 
@@ -219,7 +219,7 @@ _SUITE_NAMES = ["classical", "pqc", "hybrid"]
 
 def run_all(suite_names: list[str]) -> None:
     env = collect_env()
-    suites_dir = Path(__file__).resolve().parents[4] / "configs" / "suites"
+    suites_dir = Path(__file__).resolve().parents[3] / "configs" / "suites"
     for name in suite_names:
         path = suites_dir / f"{name}.toml"
         if not path.exists():
