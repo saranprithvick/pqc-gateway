@@ -1,0 +1,14 @@
+# python_version: 3.13.2
+# os: Darwin
+# os_version: 25.6.0
+# cpu: arm
+# liboqs_version: 0.16.0
+# cryptography_version: 50.0.2
+# git_commit: d370883
+# seed: 0
+# timestamp: 2026-11-13T05:06:40Z
+config,baseline_bytes,frag_header_bytes,prefix_bytes,record_header_bytes,record_tag_bytes,total_overhead_bytes,dlc
+c0,5,8,0,0,0,13,8
+c1,5,8,1,16,16,46,8
+c2,5,8,1,16,16,46,8
+c3,5,8,1,16,16,46,8
