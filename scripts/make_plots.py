@@ -1,12 +1,15 @@
 """Generate matplotlib figures from benchmark results.
 
 Figures produced:
-  1. micro_latency_cdf.png  — per-algorithm AEAD encrypt latency empirical CDF
-                              (one line per suite), log y-axis for micro timings
-  2. handshake_bars.png     — median handshake wall time per config × profile,
+  1. micro_keygen.png       — keygen times by algorithm (grouped bar, log y)
+  2. micro_ops.png          — encaps/decaps/sign/verify median µs (grouped bar, log y)
+  3. micro_aead.png         — AEAD encrypt/decrypt µs vs payload size (line, log y)
+  4. handshake_bars.png     — median handshake wall time per config × profile,
                               stacked bars: crypto / link / retransmit-wait / other
-  3. latency_cdf.png        — empirical CDF of per-record latency for C1–C3 × ideal
-  4. contact_window_heat.png — heatmap of window/handshake ratio:
+  5. latency_cdf.png        — empirical CDF of per-record latency for C1–C3 × ideal
+  6. e2e_overhead.png       — per-layer bytes/record for C0–C3 (stacked bar)
+  7. rekey_sweep.png        — overhead bytes/frame vs rekey interval (line, log x)
+  8. contact_window_heat.png — heatmap of window/handshake ratio:
                                rows = (range_m, speed_kmh), cols = config×profile
                                for profiles {ideal, delay50, loss5}
 
@@ -253,6 +256,220 @@ def plot_contact_window_heatmap(plt, show: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Figure: micro keygen times (grouped bar, log y)
+# ---------------------------------------------------------------------------
+
+def plot_micro_keygen(plt, show: bool) -> None:
+    _FIGURES.mkdir(parents=True, exist_ok=True)
+    micro_rows = _load_csv(_TABLES / "micro.csv")
+    keygen_rows = [r for r in micro_rows if r.get("op") in ("kem_keygen", "sig_keygen")]
+    if not keygen_rows:
+        print("  No micro keygen data — skipping micro_keygen.png")
+        return
+
+    algos = list({r["alg"] for r in keygen_rows})
+    ops = ["kem_keygen", "sig_keygen"]
+    colors = {"kem_keygen": "#2196F3", "sig_keygen": "#F44336"}
+    x = list(range(len(algos)))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for i, op in enumerate(ops):
+        vals = []
+        for alg in algos:
+            matches = [r for r in keygen_rows if r["alg"] == alg and r["op"] == op]
+            vals.append(float(matches[0]["median_ns"]) / 1e3 if matches else 0.0)
+        offset = (i - len(ops) / 2 + 0.5) * width
+        ax.bar([xi + offset for xi in x], vals, width, label=op, color=colors[op], alpha=0.85)
+
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels(algos, rotation=30, ha="right", fontsize=8)
+    ax.set_ylabel("Median time (µs, log scale)")
+    ax.set_title("Keygen times by algorithm")
+    ax.legend(fontsize=9)
+    ax.grid(True, axis="y", alpha=0.3)
+    out = _FIGURES / "micro_keygen.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"→ {out}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Figure: micro KEM/SIG ops (grouped bar, log y)
+# ---------------------------------------------------------------------------
+
+def plot_micro_ops(plt, show: bool) -> None:
+    _FIGURES.mkdir(parents=True, exist_ok=True)
+    micro_rows = _load_csv(_TABLES / "micro.csv")
+    ops_of_interest = ["kem_encaps", "kem_decaps", "sig_sign", "sig_verify"]
+    op_rows = [r for r in micro_rows if r.get("op") in ops_of_interest]
+    if not op_rows:
+        print("  No micro ops data — skipping micro_ops.png")
+        return
+
+    algos = list({r["alg"] for r in op_rows})
+    colors = {
+        "kem_encaps": "#2196F3", "kem_decaps": "#03A9F4",
+        "sig_sign": "#F44336", "sig_verify": "#FF7043",
+    }
+    x = list(range(len(algos)))
+    width = 0.2
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    for i, op in enumerate(ops_of_interest):
+        vals = []
+        for alg in algos:
+            matches = [r for r in op_rows if r["alg"] == alg and r["op"] == op]
+            vals.append(float(matches[0]["median_ns"]) / 1e3 if matches else 0.0)
+        offset = (i - len(ops_of_interest) / 2 + 0.5) * width
+        ax.bar([xi + offset for xi in x], vals, width,
+               label=op, color=colors[op], alpha=0.85)
+
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels(algos, rotation=30, ha="right", fontsize=8)
+    ax.set_ylabel("Median time (µs, log scale)")
+    ax.set_title("KEM / Signature operation times by algorithm")
+    ax.legend(fontsize=8, loc="upper left")
+    ax.grid(True, axis="y", alpha=0.3)
+    out = _FIGURES / "micro_ops.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"→ {out}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Figure: AEAD encrypt/decrypt vs payload size (line, log y)
+# ---------------------------------------------------------------------------
+
+def plot_micro_aead(plt, show: bool) -> None:
+    _FIGURES.mkdir(parents=True, exist_ok=True)
+    micro_rows = _load_csv(_TABLES / "micro.csv")
+    aead_rows = [r for r in micro_rows if r.get("op") in ("aead_encrypt", "aead_decrypt")]
+    if not aead_rows:
+        print("  No micro AEAD data — skipping micro_aead.png")
+        return
+
+    suites = ["classical", "pqc", "hybrid"]
+    ops = ["aead_encrypt", "aead_decrypt"]
+    suite_colors = {"classical": "#2196F3", "pqc": "#F44336", "hybrid": "#4CAF50"}
+    linestyles = {"aead_encrypt": "-", "aead_decrypt": "--"}
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for suite in suites:
+        for op in ops:
+            rows = [r for r in aead_rows if r.get("alg") == suite and r.get("op") == op]
+            if not rows:
+                continue
+            try:
+                xs = [int(r["payload_bytes"]) for r in rows]
+                ys = [float(r["median_ns"]) / 1e3 for r in rows]
+                xs, ys = zip(*sorted(zip(xs, ys)))
+                ax.plot(xs, ys, marker="o", linestyle=linestyles[op],
+                        color=suite_colors[suite],
+                        label=f"{suite} {op.split('_')[1]}", linewidth=1.5)
+            except (ValueError, KeyError):
+                pass
+
+    ax.set_yscale("log")
+    ax.set_xscale("log")
+    ax.set_xlabel("Payload size (bytes)")
+    ax.set_ylabel("Median time (µs, log scale)")
+    ax.set_title("AEAD encrypt/decrypt vs payload size")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    out = _FIGURES / "micro_aead.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"→ {out}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Figure: per-layer overhead stacked bar (C0–C3)
+# ---------------------------------------------------------------------------
+
+def plot_overhead_bars(plt, show: bool) -> None:
+    _FIGURES.mkdir(parents=True, exist_ok=True)
+    rows = _load_csv(_TABLES / "overhead.csv")
+    if not rows:
+        print("  No overhead data — skipping e2e_overhead.png")
+        return
+
+    configs = [r["config"] for r in rows]
+    layers = ["baseline_bytes", "frag_header_bytes", "prefix_bytes",
+              "record_header_bytes", "record_tag_bytes"]
+    labels = ["Baseline (5B)", "Frag header (8B)", "Type prefix (1B)",
+              "Record header (16B)", "AEAD tag (16B)"]
+    colors = ["#9E9E9E", "#FF9800", "#03A9F4", "#2196F3", "#F44336"]
+
+    x = list(range(len(configs)))
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bottoms = [0.0] * len(configs)
+    for layer, label, color in zip(layers, labels, colors):
+        vals = []
+        for r in rows:
+            try:
+                vals.append(float(r.get(layer, 0)))
+            except (ValueError, TypeError):
+                vals.append(0.0)
+        ax.bar(x, vals, bottom=bottoms, label=label, color=color, alpha=0.85)
+        bottoms = [b + v for b, v in zip(bottoms, vals)]
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(configs)
+    ax.set_ylabel("Bytes per record")
+    ax.set_title("Per-record overhead layer decomposition (C0–C3)")
+    ax.legend(fontsize=8, loc="upper left")
+    ax.grid(True, axis="y", alpha=0.3)
+    out = _FIGURES / "e2e_overhead.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"→ {out}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Figure: rekey sweep (line, log x)
+# ---------------------------------------------------------------------------
+
+def plot_rekey_sweep(plt, show: bool) -> None:
+    _FIGURES.mkdir(parents=True, exist_ok=True)
+    rows = _load_csv(_TABLES / "rekey_sweep.csv")
+    if not rows:
+        print("  No rekey_sweep data — skipping rekey_sweep.png")
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    try:
+        intervals = [int(r["rekey_interval"]) for r in rows]
+        rekey_counts = [int(r["rekey_count"]) for r in rows]
+        ax.plot(intervals, rekey_counts, marker="o", linewidth=2, color="#F44336")
+        ax.set_xscale("log")
+        ax.set_xlabel("Rekey interval (records, log scale)")
+        ax.set_ylabel("Rekey count per 1000 frames")
+        ax.set_title("C3 light rekey frequency vs interval setting")
+        ax.grid(True, alpha=0.3)
+    except (ValueError, KeyError) as exc:
+        ax.text(0.5, 0.5, f"Data error: {exc}",
+                ha="center", va="center", transform=ax.transAxes)
+
+    out = _FIGURES / "rekey_sweep.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"→ {out}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -265,8 +482,13 @@ def main() -> None:
     _FIGURES.mkdir(parents=True, exist_ok=True)
 
     print("Generating plots…")
+    plot_micro_keygen(plt, args.show)
+    plot_micro_ops(plt, args.show)
+    plot_micro_aead(plt, args.show)
     plot_micro_aead_cdf(plt, args.show)
     plot_handshake_bars(plt, args.show)
+    plot_overhead_bars(plt, args.show)
+    plot_rekey_sweep(plt, args.show)
     plot_contact_window_heatmap(plt, args.show)
     print("Done.")
 

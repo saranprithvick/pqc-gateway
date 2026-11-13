@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv as _csv
 import gc
 import os
 import sys
@@ -242,6 +243,28 @@ def run_all(suite_names: list[str]) -> None:
             bench_aead(name, env)
         except Exception as exc:
             print(f"  AEAD bench failed: {exc}")
+    consolidate_micro_csv(suite_names, env)
+
+
+def consolidate_micro_csv(suite_names: list[str], env: dict) -> None:
+    """Read per-suite raw CSVs and write combined results/tables/micro.csv."""
+    all_rows: list[dict] = []
+    for name in suite_names:
+        for op_type in ("kem", "sig", "kdf", "aead"):
+            path = _RESULTS_DIR / f"micro_{name}_{op_type}.csv"
+            if not path.exists():
+                continue
+            with open(path) as fh:
+                lines = [l for l in fh if not l.startswith("#")]
+            all_rows.extend(list(_csv.DictReader(lines)))
+    if all_rows:
+        tables_dir = Path(__file__).resolve().parents[3] / "results" / "tables"
+        tables_dir.mkdir(parents=True, exist_ok=True)
+        # Always overwrite the summary table (not append)
+        out = tables_dir / "micro.csv"
+        out.unlink(missing_ok=True)
+        write_csv(out, all_rows, env)
+        print(f"  → {out} ({len(all_rows)} rows)")
 
 
 if __name__ == "__main__":

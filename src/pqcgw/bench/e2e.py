@@ -84,7 +84,7 @@ _N_DATA_FRAMES = 100   # frames for latency / throughput sub-runs
 _DATA_RATE_HZ = 100.0  # §6 scenario rate
 _REKEY_LIGHT_TRIALS = 20
 _REKEY_FULL_TRIALS = 10
-_REKEY_INTERVALS = [100, 500, 1000, 5000, 10000]  # records between rekeys
+_REKEY_INTERVALS = [10, 20, 50, 100, 200, 500, 1000, 5000]  # one-factor sweep
 
 _ALLOWED_SUITES = [1, 2, 3]  # C1, C2, C3
 
@@ -437,17 +437,20 @@ async def _run_throughput(
 
 
 def run_throughput_memory(config: str, profile: str, env: dict) -> None:
-    """Sub-run C: throughput saturation + peak memory."""
+    """Sub-run C: throughput saturation (timed) + peak memory (separate untimed run).
+
+    Memory and timing are intentionally separated per §8: tracemalloc must not
+    run during the timed section.
+    """
     suite_name = _CONFIGS[config]
-    chan = _unique_channel()
     net_cfg = _net_config(profile)
 
     if config == "c0":
         print(f"  [C] {config}/{profile}: skipping (passthrough not instrumented)")
         return
 
-    # Memory: tracemalloc NOT during timed run (CLAUDE.md §8)
-    tracemalloc.start()
+    # Timed run — no tracemalloc
+    chan = _unique_channel()
     gc.collect()
     try:
         result = asyncio.run(
@@ -455,10 +458,20 @@ def run_throughput_memory(config: str, profile: str, env: dict) -> None:
             debug=False,
         )
     except Exception as exc:
-        tracemalloc.stop()
-        print(f"  [C] {config}/{profile}: FAILED — {exc}")
+        print(f"  [C] {config}/{profile}: timed run FAILED — {exc}")
         return
 
+    # Separate memory run — tracemalloc on, no timing recorded
+    chan2 = _unique_channel()
+    tracemalloc.start()
+    gc.collect()
+    try:
+        asyncio.run(
+            _run_throughput(suite_name, net_cfg, chan2, _N_DATA_FRAMES),
+            debug=False,
+        )
+    except Exception:
+        pass
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
@@ -525,8 +538,69 @@ async def _measure_light_rekey(suite_name: str, net_cfg: NetworkConfig, chan: st
     }
 
 
+def _run_rekey_interval_sweep(suite_name: str, net_cfg: NetworkConfig, env: dict) -> None:
+    """Light rekey interval sweep: vary record_count trigger; record overhead bytes/frame."""
+    _N_SWEEP_FRAMES = 1000
+    rows: list[dict] = []
+    for interval in _REKEY_INTERVALS:
+        chan = _unique_channel()
+        try:
+            r = asyncio.run(
+                _run_rekey_sweep_trial(suite_name, net_cfg, chan, interval, _N_SWEEP_FRAMES),
+                debug=False,
+            )
+            rows.append({
+                "config": "c3",
+                "profile": "ideal",
+                "rekey_interval": interval,
+                **r,
+            })
+            print(f"      sweep interval={interval}: rekeys={r['rekey_count']}")
+        except Exception as exc:
+            print(f"      sweep interval={interval}: FAILED — {exc}")
+
+    if rows:
+        write_csv(_TABLES_DIR / "rekey_sweep.csv", rows, env)
+        print(f"  [D-sweep] wrote {len(rows)} rows to rekey_sweep.csv")
+
+
+async def _run_rekey_sweep_trial(
+    suite_name: str, net_cfg: NetworkConfig, chan: str, interval: int, n_frames: int
+) -> dict:
+    """Run n_frames at a fixed rekey interval; return bytes sent and rekey count."""
+    suite = load_suite(_SUITE_DIR / f"{suite_name}.toml")
+    gw_id, peer_id = _make_identities(suite)
+    emulator = LinkEmulator(net_cfg)
+    gw_link = emulator.gateway_half
+    peer_link = emulator.peer_half
+    sink: asyncio.Queue[CANFrame] = asyncio.Queue()
+
+    rekey_trig = RekeyTrigger(record_count=interval)
+    rekey_cfg = RekeyConfig(rekey_timeout_ms=400, rekey_max_retries=3)
+
+    with CanAdapter(chan) as can:
+        gw = Gateway(suite, gw_id, can, gw_link,
+                     rekey_config=rekey_cfg, trigger=rekey_trig)
+        peer = ModernPeer(suite, peer_id, peer_link, sink, rekey_config=rekey_cfg)
+        _gw_hs = asyncio.create_task(gw.handshake())
+        _peer_hs = asyncio.create_task(peer.handshake())
+        await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=10.0)
+
+        for i in range(n_frames):
+            can.send(CANFrame(can_id=0x100, dlc=_FRAME_DLC,
+                              data=bytes([i % 256] * _FRAME_DLC)))
+        gw_task = asyncio.create_task(gw.run(n_frames=n_frames))
+        peer_task = asyncio.create_task(peer.run(n_frames=n_frames))
+        await asyncio.wait_for(asyncio.gather(gw_task, peer_task), timeout=60.0)
+
+    return {
+        "rekey_count": (gw._sm.epoch if gw._sm else 0),
+        "n_frames": n_frames,
+    }
+
+
 def run_rekey_cost(config: str, profile: str, env: dict) -> None:
-    """Sub-run D: light-rekey cost ×20, interval sweep."""
+    """Sub-run D: light-rekey cost ×20 + interval sweep (C3/ideal only)."""
     if config == "c0":
         print(f"  [D] {config}/{profile}: C0 has no rekey — skipping")
         return
@@ -554,6 +628,10 @@ def run_rekey_cost(config: str, profile: str, env: dict) -> None:
         write_csv(_RAW_DIR / f"rekey_light_{config}_{profile}.csv", rows, env)
         write_csv(_TABLES_DIR / "rekey_cost.csv",
                   [{"config": config, "profile": profile, "type": "light", **st.as_dict("time_")}], env)
+
+    # Interval sweep: only for C3 on ideal profile (§plan sub-run D)
+    if config == "c3" and profile == "ideal":
+        _run_rekey_interval_sweep(suite_name, net_cfg, env)
 
 
 # ---------------------------------------------------------------------------
@@ -594,8 +672,19 @@ def measure_overhead(config: str, dlc: int = _FRAME_DLC) -> dict:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def run(configs: list[str], profiles: list[str]) -> None:
+def run(
+    configs: list[str],
+    profiles: list[str],
+    skip_hs: bool = False,
+    sub: Optional[set[str]] = None,
+) -> None:
+    """Run e2e benchmarks.
+
+    skip_hs: skip sub-run A (handshake trials) — use when already complete.
+    sub: set of sub-run letters to run, e.g. {"B","C","D"}. None = all.
+    """
     env = collect_env()
+    _subs = sub if sub is not None else {"A", "B", "C", "D"}
 
     # Write overhead decomposition table once
     overhead_rows = [measure_overhead(c) for c in configs]
@@ -604,10 +693,14 @@ def run(configs: list[str], profiles: list[str]) -> None:
     for config in configs:
         for profile in profiles:
             print(f"\n--- {config} / {profile} ---")
-            run_handshake_trials(config, profile, env)
-            run_latency(config, profile, env)
-            run_throughput_memory(config, profile, env)
-            run_rekey_cost(config, profile, env)
+            if "A" in _subs and not skip_hs:
+                run_handshake_trials(config, profile, env)
+            if "B" in _subs:
+                run_latency(config, profile, env)
+            if "C" in _subs:
+                run_throughput_memory(config, profile, env)
+            if "D" in _subs:
+                run_rekey_cost(config, profile, env)
 
 
 if __name__ == "__main__":
@@ -616,5 +709,14 @@ if __name__ == "__main__":
                         help="Config(s): c0 c1 c2 c3")
     parser.add_argument("--profile", nargs="*", default=_PROFILES,
                         help="Network profile(s)")
+    parser.add_argument("--skip-hs", action="store_true",
+                        help="Skip sub-run A (handshake) — use when already complete")
+    parser.add_argument("--sub", nargs="*", choices=["A", "B", "C", "D"],
+                        help="Run only these sub-runs (default: all)")
     args = parser.parse_args()
-    run(args.config, args.profile)
+    run(
+        args.config,
+        args.profile,
+        skip_hs=args.skip_hs,
+        sub=set(args.sub) if args.sub else None,
+    )
