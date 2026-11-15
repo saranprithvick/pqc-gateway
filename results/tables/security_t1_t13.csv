@@ -1,0 +1,25 @@
+# python_version,"3.13.2 (v3.13.2:4f8bb3947cf, Feb  4 2025, 11:51:10) [Clang 15.0.0 (clang-1500.3.9.4)]"
+# os,macOS-26.6.2-arm64-arm-64bit-Mach-O
+# cpu,arm
+# liboqs_version,unknown
+# git_commit,b1069f3798831aceb3137c5bcba3a3dc3253d8c8
+# timestamp,2026-11-15T15:05:26Z
+# no_slow,False
+#
+# Legend: 'expected ✓' = test passed with expected outcome;,'expected ✗' = test failed or unexpected outcome;,'n/a' = test not applicable for this config (see §9);,'mechanism_absent' = mechanism not in installed liboqs.
+# C0 tests for T1/T2/T3/T12: 'accepted ✓' means attack succeeded,"(vulnerability confirmed, not a failure — expected per §9)"
+#
+test,C0,C1,C2,C3,matrix-a-128,matrix-a-cha,matrix-base,matrix-d-384,matrix-k-1024,matrix-k-512,matrix-k-768,matrix-s-44,matrix-s-87,matrix-s-ecdsa,matrix-s-slh,matrix-x-falcon512,matrix-x-hqc3,unknown
+T1,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,not_run
+T2,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,not_run
+T3,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,not_run
+T4,not_run,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,not_run
+T5,not_run,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,not_run
+T6,not_run,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,not_run
+T7,not_run,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,not_run
+T8,not_run,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,not_run
+T9,not_run,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓
+T10,not_run,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,not_run
+T11,not_run,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,not_run
+T12,forwarded ✓,forwarded ✓,forwarded ✓,forwarded ✓,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run
+T13,not_run,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,not_run

@@ -1,0 +1,24 @@
+# timing_note,"FUNCTIONAL RUN TIME, not a benchmark (see CLAUDE.md §8)"
+# python_version,"3.13.2 (v3.13.2:4f8bb3947cf, Feb  4 2025, 11:51:10) [Clang 15.0.0 (clang-1500.3.9.4)]"
+# os,macOS-26.6.2-arm64-arm-64bit-Mach-O
+# cpu,arm
+# liboqs_version,unknown
+# git_commit,b1069f3798831aceb3137c5bcba3a3dc3253d8c8
+# src_dirty,false
+# timestamp,2026-11-15T15:05:13Z
+# no_slow,False
+
+entry_id,description,factor,experimental,config_only,handshake_ok,frag_count_i2r_match,frag_count_r2i_match,traffic_ok,t1_ok,t2_ok,t3_ok,t4_ok,t5_ok,t6_ok,t7_ok,t8_ok,t9_ok,t10_ok,t11_ok,t13_ok,overall_pass,run_time_ms
+base,C3 baseline: hybrid KEM + dual signature + SHA-256 KDF + AES-256-GCM,baseline,false,pass,pass,pass,pass,pass,passed,passed,passed,passed,passed,passed,passed,passed,passed,passed,passed,passed,pass,
+k-512,KEM swap: standalone ML-KEM-512 (replaces full hybrid),kem,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+k-768,KEM swap: standalone ML-KEM-768 (replaces full hybrid),kem,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+k-1024,KEM swap: standalone ML-KEM-1024 (replaces full hybrid),kem,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+s-44,SIG swap: standalone ML-DSA-44 (replaces full dual sig),sig,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+s-87,SIG swap: standalone ML-DSA-87 (replaces full dual sig),sig,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+s-slh,"SIG swap: standalone SLH-DSA-SHA2-128f (~17 KB sig, stress test)",sig,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+s-ecdsa,SIG swap: standalone ECDSA-P256 only (classical regression check),sig,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+d-384,KDF swap: HKDF-SHA-384,kdf,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+a-128,AEAD swap: AES-128-GCM,aead,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+a-cha,AEAD swap: ChaCha20-Poly1305,aead,false,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+x-hqc3,"Experimental KEM: HQC-3 (level 3, pre-standardisation)",kem,true,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
+x-falcon512,"Experimental SIG: Falcon-512 (pre-standard, no NIST level-3 variant)",sig,true,pass,pass,pass,pass,pass,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,not_found,fail,
