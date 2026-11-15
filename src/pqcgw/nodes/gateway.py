@@ -655,6 +655,19 @@ class Gateway:
                 if kind == "can":
                     await self.send_frame(value)
                     frames_sent += 1
+                    # Eagerly fire auto-trigger so _has_pending_work() sees
+                    # REQ_SENT on the next loop-condition check.  Needed when
+                    # frames_sent reaches n_frames exactly at the trigger
+                    # threshold: without this the loop would exit before step 2
+                    # (trigger check) runs on the next iteration.
+                    if (self._sm is not None
+                            and not self._full_rekey_pending
+                            and self._sm.rekey_state == RekeyState.IDLE
+                            and self._triggers_fire()):
+                        req = self._sm.initiate_light_rekey()
+                        await self._link.send(bytes([_T_DATA]) + req)
+                        self._records_sealed = self._bytes_sealed = 0
+                        self._session_start = time.monotonic()
                 else:  # "link"
                     raw = value
                     if len(raw) < 1:
@@ -695,19 +708,12 @@ class Gateway:
     def _has_pending_work(self) -> bool:
         """True if the run loop must continue even after n_frames are forwarded.
 
-        Conditions (all checked; rekey timeout exits via AlertError, not here):
-          - Light rekey awaiting ACK: exit only after REKEY_ACK is received
-            (epoch would otherwise stay at the pre-rekey value).
-          - Full rekey task running: _do_full_rekey is in flight.
-          - CounterExhausted pending buffer non-empty: frames are queued for
-            flush after the next rekey completes; draining them requires at
-            least one more outbound message exchange.
-          - SM outbound queue non-empty: a REKEY_REQ retransmit is pending;
-            step 4 of the loop drains it, but only while the loop is running.
-          - A trigger is about to fire: the loop needs one more iteration to
-            execute step 2 (trigger check), initiate the rekey, and then wait
-            for REKEY_ACK — otherwise epoch would never advance for the last
-            batch of records sealed exactly at the threshold.
+        Only in-progress work is checked; future triggers are not:
+          - Light rekey awaiting ACK (REQ_SENT): exit only after ACK arrives.
+          - Full rekey task in flight: _do_full_rekey running.
+          - CounterExhausted pending buffer non-empty: awaiting flush post-rekey.
+          - SM outbound queue non-empty: a REKEY_REQ retransmit is pending.
+        Rekey timeout exits via AlertError, never here.
         """
         if self._sm is None:
             return False
@@ -718,11 +724,6 @@ class Gateway:
         if bool(self._pending):
             return True
         if self._sm._outbound_queue:  # noqa: SLF001
-            return True
-        # Trigger about to fire on the next iteration's step-2 check
-        if (not self._full_rekey_pending
-                and self._sm.rekey_state == RekeyState.IDLE
-                and self._triggers_fire()):
             return True
         return False
 

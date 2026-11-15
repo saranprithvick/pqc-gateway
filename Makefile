@@ -23,6 +23,10 @@ bench:
 	.venv/bin/python -m pqcgw.bench.micro
 	@echo "--- End-to-end benchmarks ---"
 	.venv/bin/python -m pqcgw.bench.e2e
+	@echo "--- Agility matrix + security tests ---"
+	.venv/bin/python scripts/run_matrix.py
+	@echo "--- Security results table ---"
+	.venv/bin/python scripts/make_security_table.py
 	@echo "--- Analytical: bus_time ---"
 	.venv/bin/python -m pqcgw.bench.analytical.bus_time
 	@echo "--- Analytical: contact_window ---"

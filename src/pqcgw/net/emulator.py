@@ -99,6 +99,10 @@ class LinkEmulator:
         # Link-delay accumulators (ns per delivered message, for benchmark decomposition)
         self._link_ns_i2r: list[int] = [0]
         self._link_ns_r2i: list[int] = [0]
+        # Drop log: each entry is {"direction", "msg_id", "frag_idx", "frag_count",
+        # "type_byte"} where type_byte is the C1–C3 prefix byte from the first
+        # fragment's payload (None for C0/unknown).
+        self._drop_log: list[dict] = []
         # Queues: gw_send → impair_i2r → peer_recv; peer_send → impair_r2i → gw_recv
         self._gw_send: asyncio.Queue[bytes] = asyncio.Queue()
         self._peer_recv: asyncio.Queue[bytes] = asyncio.Queue()
@@ -135,6 +139,11 @@ class LinkEmulator:
         self._link_ns_r2i[0] = 0
 
     @property
+    def dropped_messages(self) -> list[dict]:
+        """Log of dropped fragments: [{direction, msg_id, frag_idx, frag_count, type_byte}]."""
+        return self._drop_log
+
+    @property
     def gateway_half(self) -> Link:
         self._start()  # ensure impairment tasks are running before first use
         return self._gw_half
@@ -155,6 +164,7 @@ class LinkEmulator:
                 out_q=self._peer_recv,
                 counter=self._frags_i2r,
                 link_ns_acc=self._link_ns_i2r,
+                direction="i2r",
             )
         ))
         self._tasks.append(loop.create_task(
@@ -163,6 +173,7 @@ class LinkEmulator:
                 out_q=self._gw_recv,
                 counter=self._frags_r2i,
                 link_ns_acc=self._link_ns_r2i,
+                direction="r2i",
             )
         ))
 
@@ -172,6 +183,7 @@ class LinkEmulator:
         out_q: asyncio.Queue,
         counter: list[int],
         link_ns_acc: list[int],
+        direction: str = "unknown",
     ) -> None:
         reassembler = Reassembler()
         rng = random.Random(self._rng.random())  # per-direction seeded sub-RNG
@@ -190,6 +202,19 @@ class LinkEmulator:
                     await asyncio.sleep(serialise_s)
                 # Loss
                 if self._config.loss_pct > 0 and rng.random() * 100 < self._config.loss_pct:
+                    # Parse fragment header to record type_byte for drop log.
+                    frag_idx = int.from_bytes(frag_bytes[4:6], "big") if len(frag_bytes) >= 6 else 0
+                    frag_count = int.from_bytes(frag_bytes[6:8], "big") if len(frag_bytes) >= 8 else 1
+                    type_byte: Optional[int] = (
+                        frag_bytes[8] if frag_idx == 0 and len(frag_bytes) > 8 else None
+                    )
+                    self._drop_log.append({
+                        "direction": direction,
+                        "msg_id": int.from_bytes(frag_bytes[0:4], "big") if len(frag_bytes) >= 4 else 0,
+                        "frag_idx": frag_idx,
+                        "frag_count": frag_count,
+                        "type_byte": type_byte,
+                    })
                     continue  # drop this fragment
                 # Feed to reassembler; deliver when complete
                 result = reassembler.feed(frag_bytes)

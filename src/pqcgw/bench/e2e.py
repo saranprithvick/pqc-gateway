@@ -83,7 +83,7 @@ _CONFIGS: dict[str, str] = {
 _PROFILES: list[str] = ["ideal", "delay5", "delay20", "delay50", "loss1", "loss5", "bw6000"]
 
 _HANDSHAKE_TRIALS = 200
-_N_DATA_FRAMES = 100   # frames for latency / throughput sub-runs
+_N_DATA_FRAMES = 1000  # frames for latency sub-run (§8)
 _DATA_RATE_HZ = 100.0  # §6 scenario rate
 _REKEY_LIGHT_TRIALS = 20
 _REKEY_FULL_TRIALS = 10
@@ -137,6 +137,34 @@ def _unique_channel() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# Prefix-byte → human-readable name (§15 item 22)
+_PREFIX_NAMES: dict[int, str] = {
+    0x01: "HELLO_I", 0x02: "HELLO_R",
+    0x03: "FINISHED_I", 0x04: "FINISHED_R", 0x10: "DATA",
+}
+
+_AMORTISE_SESSIONS = [100, 1000, 10000]  # records to amortise HS cost over
+
+
+class _ByteTracker:
+    """Wraps a Link; records (type_byte, len) for every send() call."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.sent: list[tuple[int, int]] = []
+
+    async def send(self, msg: bytes) -> None:
+        self.sent.append((msg[0] if msg else 0, len(msg)))
+        await self._inner.send(msg)
+
+    async def recv(self, timeout: float = 1.0):
+        return await self._inner.recv(timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
 # Sub-run A: Handshake timing
 # ---------------------------------------------------------------------------
 
@@ -153,6 +181,9 @@ async def _one_handshake(
       HELLO_I phase:    6 attempts × 200ms×2^(0..5) = 6.2 s
       FINISHED_I phase: same = 6.2 s
       Total worst case: ≈ 12.4 s  →  budget = 15 s
+
+    Returns timing breakdown, per-message byte sizes, amortised overhead, and
+    last_lost_msg (from emulator drop log) on failure.
     """
     _BUDGET_S = 15.0
 
@@ -162,23 +193,27 @@ async def _one_handshake(
     peer_hook = SummingHook()
 
     emulator = LinkEmulator(net_cfg)
-    gw_link = emulator.gateway_half
-    peer_link = emulator.peer_half
+    gw_link_raw = emulator.gateway_half
+    peer_link_raw = emulator.peer_half
     emulator.reset_link_ns()
+
+    # Byte trackers intercept send() on both sides to record per-message sizes.
+    gw_tracker = _ByteTracker(gw_link_raw)
+    peer_tracker = _ByteTracker(peer_link_raw)
 
     sink: asyncio.Queue[CANFrame] = asyncio.Queue()
     rekey_cfg = RekeyConfig()
 
     with CanAdapter(chan) as can:
         gw = Gateway(
-            suite, gw_id, can, gw_link,
+            suite, gw_id, can, gw_tracker,
             rekey_config=rekey_cfg,
             handshake_timeout_ms=200,
             handshake_max_retries=5,
             crypto_hook=gw_hook,
         )
         peer = ModernPeer(
-            suite, peer_id, peer_link, sink,
+            suite, peer_id, peer_tracker, sink,
             rekey_config=rekey_cfg,
             crypto_hook=peer_hook,
         )
@@ -201,7 +236,18 @@ async def _one_handshake(
             await asyncio.wait_for(gw_task, timeout=_BUDGET_S)
             t_wall_end = time.perf_counter_ns()
         except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as exc:
-            return {"success": False, "error": type(exc).__name__ + ": " + str(exc)}
+            # Collect last dropped message from emulator for diagnosis.
+            drops = emulator.dropped_messages
+            last_lost: Optional[str] = None
+            if drops:
+                d = drops[-1]
+                name = _PREFIX_NAMES.get(d["type_byte"], f"0x{d['type_byte']:02x}")
+                last_lost = f"{name} frag {d['frag_idx']}/{d['frag_count']} ({d['direction']})"
+            return {
+                "success": False,
+                "error": type(exc).__name__ + ": " + str(exc),
+                "last_lost_msg": last_lost,
+            }
         finally:
             peer_task.cancel()
             await asyncio.gather(peer_task, return_exceptions=True)
@@ -211,6 +257,14 @@ async def _one_handshake(
     link_ns = emulator.handshake_link_ns_i2r + emulator.handshake_link_ns_r2i
     retransmit_wait_ns = gw.handshake_retransmit_wait_ns
     other_ns = max(0, wall_ns - crypto_ns - link_ns - retransmit_wait_ns)
+
+    # Per-message byte sizes (first send per type prefix, bytes include prefix byte).
+    msg_bytes: dict[str, int] = {}
+    for type_byte, nbytes in gw_tracker.sent + peer_tracker.sent:
+        name = _PREFIX_NAMES.get(type_byte, f"0x{type_byte:02x}")
+        if name not in msg_bytes:
+            msg_bytes[name] = nbytes
+    total_hs_bytes = sum(n for _, n in gw_tracker.sent + peer_tracker.sent)
 
     return {
         "success": True,
@@ -222,6 +276,12 @@ async def _one_handshake(
         "retransmits": gw.handshake_retransmit_count,
         "frags_i2r": emulator.fragments_sent_i2r,
         "frags_r2i": emulator.fragments_sent_r2i,
+        "bytes_hello_i": msg_bytes.get("HELLO_I", 0),
+        "bytes_hello_r": msg_bytes.get("HELLO_R", 0),
+        "bytes_finished_i": msg_bytes.get("FINISHED_I", 0),
+        "bytes_finished_r": msg_bytes.get("FINISHED_R", 0),
+        "bytes_total_hs": total_hs_bytes,
+        **{f"amortised_overhead_{n}": total_hs_bytes / n for n in _AMORTISE_SESSIONS},
     }
 
 
@@ -263,10 +323,11 @@ def run_handshake_trials(
         if not result.get("success"):
             failures += 1
             reason = result.get("error", "unknown")
-            log.debug("Trial %d/%d failed: %s", i, n_trials, reason)
+            last_lost = result.get("last_lost_msg")
+            log.debug("Trial %d/%d failed: %s (last_lost=%s)", i, n_trials, reason, last_lost)
             failure_rows.append({
                 "config": config, "profile": profile, "trial": i, "seed": seed,
-                "reason": reason,
+                "reason": reason, "last_lost_msg": last_lost,
             })
             continue
 
@@ -298,12 +359,25 @@ def run_handshake_trials(
         except ValueError:
             pass
 
+        # Per-message bytes (take median across successful trials).
+        def _med_int(key: str) -> int:
+            vals = [r[key] for r in rows if r.get(key, 0) > 0]
+            return int(sorted(vals)[len(vals) // 2]) if vals else 0
+
+        total_hs_med = _med_int("bytes_total_hs")
         summary = [{
             "config": config, "profile": profile,
             "n_trials": n_trials, "n_success": len(rows), "n_fail": failures,
             "success_rate": success_rate,
             **(compute_stats(wall_samples).as_dict("wall_") if len(rows) >= 50 else {}),
             **(compute_stats(crypto_samples).as_dict("crypto_") if len(rows) >= 50 else {}),
+            "bytes_hello_i": _med_int("bytes_hello_i"),
+            "bytes_hello_r": _med_int("bytes_hello_r"),
+            "bytes_finished_i": _med_int("bytes_finished_i"),
+            "bytes_finished_r": _med_int("bytes_finished_r"),
+            "bytes_total_hs": total_hs_med,
+            **{f"amortised_overhead_{n}": round(total_hs_med / n, 2)
+               for n in _AMORTISE_SESSIONS},
         }]
         write_csv(_TABLES_DIR / "handshake.csv", summary, env)
         write_csv(_RAW_DIR / f"handshake_{config}_{profile}.csv", rows, env)
@@ -389,6 +463,67 @@ async def _run_latency(
     return tracker.latencies_ns
 
 
+async def _run_passthrough_latency(
+    net_cfg: NetworkConfig,
+    chan: str,
+    n_frames: int,
+) -> tuple[list[int], int]:
+    """Measure C0 PassthroughPath latency and return (latency_ns_list, delivered)."""
+    from pqcgw.nodes.passthrough import PassthroughPath
+
+    emulator = LinkEmulator(net_cfg)
+    gw_link = emulator.gateway_half
+    peer_link = emulator.peer_half
+    passthrough = PassthroughPath()
+    sink: asyncio.Queue[CANFrame] = asyncio.Queue()
+
+    t_ingest: dict[int, int] = {}  # seq → ingest_ns (out-of-band, not on wire)
+
+    with CanAdapter(chan) as can_gw, CanAdapter(chan) as can_sender:
+        async def _send_frames() -> None:
+            for seq in range(n_frames):
+                frame = CANFrame(can_id=0x100, dlc=8, data=seq.to_bytes(8, "big"))
+                t_ingest[seq] = time.perf_counter_ns()
+                can_sender.send(frame)
+                await asyncio.sleep(1.0 / _DATA_RATE_HZ)
+
+        async def _gw_side() -> None:
+            await passthrough.run_gateway_side(can_gw, gw_link, n_frames)
+
+        async def _peer_side() -> None:
+            received = 0
+            while received < n_frames:
+                wire = await peer_link.recv(timeout=5.0)
+                if wire is None:
+                    continue
+                try:
+                    frame = MessageAdapter.decode(wire)
+                except ValueError:
+                    continue
+                t_deliver = time.perf_counter_ns()
+                try:
+                    seq = int.from_bytes(frame.data[:8], "big")
+                except Exception:
+                    seq = -1
+                if seq in t_ingest:
+                    await sink.put((seq, t_deliver - t_ingest[seq]))
+                received += 1
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(_send_frames(), _gw_side(), _peer_side()),
+                timeout=max(5.0, n_frames / _DATA_RATE_HZ + 2.0),
+            )
+        except asyncio.TimeoutError:
+            pass
+
+    latencies: list[int] = []
+    while not sink.empty():
+        _, lat = sink.get_nowait()
+        latencies.append(lat)
+    return latencies, len(latencies)
+
+
 def run_latency(config: str, profile: str, env: dict) -> None:
     """Sub-run B: latency at scenario rate."""
     suite_name = _CONFIGS[config]
@@ -396,8 +531,34 @@ def run_latency(config: str, profile: str, env: dict) -> None:
     net_cfg = _net_config(profile)
 
     if config == "c0":
-        print(f"  [B] {config}/{profile}: C0 latency measured via passthrough (seq table)")
-        # C0 passthrough latency measured in run_passthrough_latency()
+        print(f"  [B] {config}/{profile}: C0 passthrough latency")
+        try:
+            latencies, delivered = asyncio.run(
+                _run_passthrough_latency(net_cfg, chan, _N_DATA_FRAMES),
+                debug=False,
+            )
+        except Exception as exc:
+            print(f"  [B] {config}/{profile}: FAILED — {exc}")
+            return
+        if not latencies:
+            print(f"  [B] {config}/{profile}: no latency samples")
+            return
+        rows = [{"config": "c0", "profile": profile, "latency_ns": v} for v in latencies]
+        write_csv(_RAW_DIR / f"latency_c0_{profile}.csv", rows, env)
+        delivery_ratio = delivered / _N_DATA_FRAMES
+        try:
+            st = compute_stats(latencies)
+            print(
+                f"  [B] c0/{profile}: n={st.n} delivery={delivery_ratio:.1%} "
+                f"median={st.median_ns/1e6:.2f}ms p95={st.p95_ns/1e6:.2f}ms"
+            )
+            summary = [{"config": "c0", "profile": profile,
+                        "delivery_ratio": delivery_ratio, **st.as_dict("latency_")}]
+            write_csv(_TABLES_DIR / "latency.csv", summary, env)
+        except ValueError:
+            sn = compute_small_n_stats(latencies)
+            print(f"  [B] c0/{profile}: n={sn.n} delivery={delivery_ratio:.1%} "
+                  f"median={sn.median_ns/1e6:.2f}ms")
         return
 
     try:
@@ -685,8 +846,107 @@ async def _run_rekey_sweep_trial(
     }
 
 
+async def _measure_full_rekey(
+    suite_name: str,
+    net_cfg: NetworkConfig,
+    chan: str,
+) -> dict:
+    """Measure full-rekey cost alongside 100 Hz live traffic.
+
+    Protocol:
+      1. Handshake to establish the initial session.
+      2. Start 100 Hz live traffic in background (100 frames).
+      3. After a brief warm-up, trigger a full rekey.
+      4. Record: wall time for new-session establishment, records delivered
+         on the old session during the new handshake, first new-session DATA
+         record time (from request_full_rekey() to first new-epoch DATA), and
+         records dropped (sink count vs injected while rekey in flight).
+    """
+    _N_LIVE = 100
+    _RATE_HZ = 100.0
+
+    suite = load_suite(_SUITE_DIR / f"{suite_name}.toml")
+    gw_id, peer_id = _make_identities(suite)
+
+    emulator = LinkEmulator(net_cfg)
+    gw_link = emulator.gateway_half
+    peer_link = emulator.peer_half
+    sink: asyncio.Queue[CANFrame] = asyncio.Queue()
+
+    rekey_cfg = RekeyConfig(rekey_timeout_ms=400, rekey_max_retries=5,
+                            grace_period_s=2.0, grace_period_records=64)
+
+    with CanAdapter(chan) as can, CanAdapter(chan) as injector:
+        gw = Gateway(suite, gw_id, can, gw_link, rekey_config=rekey_cfg,
+                     handshake_timeout_ms=400, handshake_max_retries=5)
+        peer = ModernPeer(suite, peer_id, peer_link, sink, rekey_config=rekey_cfg)
+
+        _gw_hs = asyncio.create_task(gw.handshake())
+        _peer_hs = asyncio.create_task(peer.handshake())
+        await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=15.0)
+
+        old_session_id = gw._sm._session_id if gw._sm else None
+
+        # Start run loops (indefinite — cancelled after measurement).
+        gw_run = asyncio.create_task(gw.run(n_frames=None))
+        peer_run = asyncio.create_task(peer.run(n_frames=None))
+
+        # Inject warm-up frames (5) so the data path is exercised before timing.
+        for i in range(5):
+            injector.send(CANFrame(can_id=0x100, dlc=8,
+                                   data=bytes([i % 256] * 8)))
+        await asyncio.sleep(0.1)
+
+        # Trigger full rekey and start timing.
+        t0 = time.perf_counter_ns()
+        gw.request_full_rekey()
+        injected_during_rekey = 0
+
+        # Inject live frames at 100 Hz while the full rekey is in flight.
+        async def _inject_live() -> None:
+            nonlocal injected_during_rekey
+            for i in range(_N_LIVE):
+                injector.send(CANFrame(can_id=0x100, dlc=8,
+                                       data=bytes([i % 256] * 8)))
+                injected_during_rekey += 1
+                await asyncio.sleep(1.0 / _RATE_HZ)
+
+        inject_task = asyncio.create_task(_inject_live())
+
+        # Poll until the session ID changes (new session up) or timeout.
+        t_new_session = 0
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+            if (gw._sm is not None
+                    and gw._sm._session_id != old_session_id
+                    and not gw._full_rekey_pending):
+                t_new_session = time.perf_counter_ns()
+                break
+
+        await asyncio.wait_for(inject_task, timeout=5.0)
+        t1 = time.perf_counter_ns()
+
+        # Allow grace period to flush remaining frames.
+        await asyncio.sleep(0.3)
+
+        gw_run.cancel()
+        peer_run.cancel()
+        await asyncio.gather(gw_run, peer_run, return_exceptions=True)
+
+    delivered = sink.qsize()
+    new_session_established = t_new_session > 0
+    return {
+        "full_rekey_wall_ns": (t_new_session - t0) if new_session_established else (t1 - t0),
+        "established": new_session_established,
+        "records_delivered": delivered,
+        "injected_during_rekey": injected_during_rekey,
+        "records_dropped": max(0, injected_during_rekey - delivered + 5),  # 5 warm-up injected before
+    }
+
+
 def run_rekey_cost(config: str, profile: str, env: dict) -> None:
-    """Sub-run D: light-rekey cost ×20 + interval sweep (C3/ideal only)."""
+    """Sub-run D: light-rekey cost ×20 + full-rekey cost ×10 + interval sweep (C3/ideal only)."""
     if config == "c0":
         print(f"  [D] {config}/{profile}: C0 has no rekey — skipping")
         return
@@ -717,6 +977,34 @@ def run_rekey_cost(config: str, profile: str, env: dict) -> None:
         write_csv(_RAW_DIR / f"rekey_light_{config}_{profile}.csv", rows, env)
         write_csv(_TABLES_DIR / "rekey_cost.csv",
                   [{"config": config, "profile": profile, "type": "light", **st.as_dict("time_")}], env)
+
+    # Full rekey cost × 10 (ideal only — full rekey under loss is out of scope for M7)
+    if profile == "ideal":
+        full_times: list[int] = []
+        full_rows: list[dict] = []
+        for i in range(_REKEY_FULL_TRIALS):
+            chan_i = _unique_channel()
+            try:
+                r = asyncio.run(_measure_full_rekey(suite_name,
+                                                    _net_config("ideal", seed=base_seed + i),
+                                                    chan_i), debug=False)
+                full_times.append(r["full_rekey_wall_ns"])
+                full_rows.append({"config": config, "profile": profile, "trial": i,
+                                   "seed": base_seed + i, **r})
+            except Exception as exc:
+                print(f"      full rekey trial {i} failed: {exc}")
+
+        if full_times:
+            st_f = compute_small_n_stats(full_times)
+            print(
+                f"  [D] {config}/{profile}: full rekey (n={st_f.n}) "
+                f"median={st_f.median_ns/1e6:.0f}ms min={st_f.min_ns/1e6:.0f}ms "
+                f"max={st_f.max_ns/1e6:.0f}ms"
+            )
+            write_csv(_RAW_DIR / f"rekey_full_{config}_{profile}.csv", full_rows, env)
+            write_csv(_TABLES_DIR / "rekey_cost.csv",
+                      [{"config": config, "profile": profile, "type": "full",
+                        **st_f.as_dict("time_")}], env)
 
     # Interval sweep: only for C3 on ideal profile (§plan sub-run D)
     if config == "c3" and profile == "ideal":

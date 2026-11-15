@@ -537,14 +537,18 @@ def test_peer_forged_new_session_header_no_switch() -> None:
 # ===========================================================================
 
 def test_full_rekey_failed_attempt_old_session_continues(can_channel: str) -> None:
-    """Full-rekey attempt fails (HELLO_R always dropped); old session delivers all
-    3 frames; AlertError is raised after max_attempts are exhausted.
+    """First full-rekey attempt fails (HELLO_R dropped once); old session
+    delivers all 3 frames during the failed attempt; second attempt succeeds
+    and the gateway switches to the new session.
 
-    Design: wrap the PEER's outbound link so HELLO_R is dropped before the
-    gateway receives it.  The gateway's _do_full_rekey() times out every
-    attempt.  3 CAN frames are injected on the OLD session (which still
-    works), then _has_pending_work() keeps the loop alive until AlertError
-    is raised after full_rekey_max_attempts failures.
+    Design: wrap the PEER's outbound link (peer_link) with _DropFirstWhere
+    so the first HELLO_R the peer sends is dropped.  Activation is deferred
+    until after the initial handshake completes to avoid interfering with it.
+    The gateway then retransmits HELLO_I; the peer responds with a second
+    HELLO_R which passes through (_dropped=True), and the full rekey succeeds.
+
+    Three CAN frames are injected on the old session and must all arrive.
+    The session ID must change after the successful rekey.
     """
     frames = _make_frames_mb5(3)
 
@@ -554,7 +558,10 @@ def test_full_rekey_failed_attempt_old_session_continues(can_channel: str) -> No
     async def _scenario():
         suite, gw_id, peer_id = _make_identities("classical")
         gw_link, peer_link_inner = LinkEmulator.make_pair(_ideal_config())
-        drop_peer_link = _DropAllWhere(peer_link_inner, lambda _: False)
+        # Start inactive; activated in _control() after initial handshake.
+        # _DropFirstWhere.send() intercepts the PEER's outbound messages so
+        # the first HELLO_R (from the full-rekey attempt) is silently dropped.
+        drop_peer_link = _DropFirstWhere(peer_link_inner, lambda _: False)
         cfg = RekeyConfig(grace_period_s=5.0, grace_period_records=100)
         sink: asyncio.Queue[CANFrame] = asyncio.Queue()
 
@@ -562,24 +569,28 @@ def test_full_rekey_failed_attempt_old_session_continues(can_channel: str) -> No
             gateway = Gateway(suite, gw_id, can_gw, gw_link,
                               rekey_config=cfg,
                               full_rekey_max_attempts=3,
-                              handshake_timeout_ms=200,
-                              handshake_max_retries=1)
-            peer = ModernPeer(suite, peer_id, drop_peer_link, sink, rekey_config=cfg)
+                              handshake_timeout_ms=400,
+                              handshake_max_retries=3)
+            peer = ModernPeer(suite, peer_id, drop_peer_link, sink,
+                              rekey_config=cfg)
 
-            session_before = [None]
+            session_before: list[Optional[bytes]] = [None]
 
             async def _control():
-                await asyncio.sleep(0.1)
-                session_before[0] = gateway._sm._session_id
+                # Wait for the initial handshake to finish, then activate drop.
+                await asyncio.sleep(0.2)
+                session_before[0] = (
+                    gateway._sm._session_id if gateway._sm else None
+                )
+                # Activate: the next HELLO_R from the peer will be dropped.
                 drop_peer_link._pred = _is_hello_r
                 gateway.request_full_rekey()
+                await asyncio.sleep(0.05)
                 await _inject(can_channel, frames)
 
-            # _has_pending_work() keeps the loop alive while _full_rekey_pending.
-            # After full_rekey_max_attempts failures AlertError is raised.
-            # Peer runs indefinitely so it can respond to old-session DATA records;
-            # cancelled in the finally block.
             gw_task = asyncio.create_task(gateway.run(n_frames=3))
+            # Peer runs indefinitely: must respond to old-session DATA records
+            # AND to the retransmitted HELLO_I from the second attempt.
             peer_task = asyncio.create_task(peer.run(n_frames=None))
             ctrl_task = asyncio.create_task(_control())
             try:
@@ -587,20 +598,21 @@ def test_full_rekey_failed_attempt_old_session_continues(can_channel: str) -> No
                     asyncio.gather(gw_task, ctrl_task),
                     timeout=15.0,
                 )
-                pytest.fail("Expected AlertError from exhausted full-rekey attempts")
-            except AlertError:
-                pass  # expected: 3 failed attempts → session closed
             finally:
-                for t in (gw_task, peer_task, ctrl_task):
+                for t in (peer_task, ctrl_task):
                     if not t.done():
                         t.cancel()
-                await asyncio.gather(gw_task, peer_task, ctrl_task,
-                                     return_exceptions=True)
+                await asyncio.gather(peer_task, ctrl_task, return_exceptions=True)
 
-        # Old session delivered all 3 frames before AlertError
+        # All 3 old-session frames must have been delivered.
         received = [sink.get_nowait() for _ in range(sink.qsize())]
-        assert len(received) == 3
-        assert session_before[0] is not None
+        assert len(received) == 3, f"Expected 3 frames, got {len(received)}"
+        assert session_before[0] is not None, "initial handshake did not complete"
+        # Session ID must have changed: second attempt succeeded.
+        assert gateway._sm is not None
+        assert gateway._sm._session_id != session_before[0], (
+            "session_id unchanged after full rekey — second attempt did not succeed"
+        )
 
     asyncio.run(_scenario())
 

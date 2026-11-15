@@ -53,8 +53,12 @@ def _time_loop(fn, n: int) -> list[int]:
     return out
 
 
+def _suite_path(name: str) -> Path:
+    return Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{name}.toml"
+
+
 def bench_kem(suite_name: str, env: dict) -> None:
-    suite = load_suite(Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{suite_name}.toml")
+    suite = load_suite(_suite_path(suite_name))
     kem = suite.kem
     rows: list[dict] = []
 
@@ -93,7 +97,7 @@ def bench_kem(suite_name: str, env: dict) -> None:
 
 
 def bench_sig(suite_name: str, env: dict) -> None:
-    suite = load_suite(Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{suite_name}.toml")
+    suite = load_suite(_suite_path(suite_name))
     sig = suite.signature
     rows: list[dict] = []
     msg = os.urandom(64)  # fixed message for all sign/verify iterations
@@ -133,7 +137,7 @@ def bench_sig(suite_name: str, env: dict) -> None:
 
 
 def bench_kdf(suite_name: str, env: dict) -> None:
-    suite = load_suite(Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{suite_name}.toml")
+    suite = load_suite(_suite_path(suite_name))
     kdf = suite.kdf
     rows: list[dict] = []
 
@@ -165,7 +169,7 @@ def bench_kdf(suite_name: str, env: dict) -> None:
 
 
 def bench_aead(suite_name: str, env: dict) -> None:
-    suite = load_suite(Path(__file__).resolve().parents[3] / "configs" / "suites" / f"{suite_name}.toml")
+    suite = load_suite(_suite_path(suite_name))
     aead = suite.aead
     rows: list[dict] = []
 
@@ -199,8 +203,15 @@ def bench_aead(suite_name: str, env: dict) -> None:
         _print_row(r)
 
 
+def _safe_name(name: str) -> str:
+    """Convert suite name (possibly with /path) to a safe filename component."""
+    return name.replace("/", "_").replace("\\", "_")
+
+
 def _write(name: str, rows: list[dict], env: dict) -> None:
-    path = _RESULTS_DIR / f"{name}.csv"
+    # name is passed as e.g. "micro_{suite_name}_{op}" — sanitize slashes in suite part.
+    safe = _safe_name(name)
+    path = _RESULTS_DIR / f"{safe}.csv"
     path.unlink(missing_ok=True)  # overwrite per bench run
     write_csv(path, rows, env)
     print(f"  → {path}")
@@ -215,44 +226,73 @@ def _print_row(r: dict) -> None:
     )
 
 
-# Suites that exist as config files
+# Suites that exist as config files (benchmarks all 4 components).
 _SUITE_NAMES = ["classical", "pqc", "hybrid"]
+
+# Matrix suites: each maps a suite name to the ops to benchmark, covering
+# algorithms not in the main 3 suites.  Experimental suites are always
+# attempted and labelled in the alg name; failures are reported but not fatal.
+# Format: (suite_name_relative_to_suites_dir, [ops], is_experimental)
+_MATRIX_SELECTIVE: list[tuple[str, list[str], bool]] = [
+    ("matrix/k-512",      ["kem"],          False),  # ML-KEM-512
+    ("matrix/k-1024",     ["kem"],          False),  # ML-KEM-1024
+    ("matrix/s-44",       ["sig"],          False),  # ML-DSA-44
+    ("matrix/s-87",       ["sig"],          False),  # ML-DSA-87
+    ("matrix/s-slh",      ["sig"],          False),  # SLH-DSA-SHA2-128f (large-sig stress)
+    ("matrix/x-falcon512",["sig"],          True),   # Falcon-512 (experimental, pre-standard)
+    ("matrix/x-hqc3",     ["kem"],          True),   # HQC-3 (experimental)
+    ("matrix/d-384",      ["kdf"],          False),  # hkdf-sha384
+    ("matrix/a-128",      ["aead"],         False),  # aes-128-gcm
+    ("matrix/a-cha",      ["aead"],         False),  # chacha20-poly1305
+]
+
+_OP_FUNCS = {"kem": bench_kem, "sig": bench_sig, "kdf": bench_kdf, "aead": bench_aead}
 
 
 def run_all(suite_names: list[str]) -> None:
     env = collect_env()
     suites_dir = Path(__file__).resolve().parents[3] / "configs" / "suites"
+
+    # Primary suites: all 4 ops.
+    all_names: list[str] = []
     for name in suite_names:
         path = suites_dir / f"{name}.toml"
         if not path.exists():
             print(f"  skipping {name}: {path} not found")
             continue
         print(f"\n=== {name} ===")
-        try:
-            bench_kem(name, env)
-        except Exception as exc:
-            print(f"  KEM bench failed: {exc}")
-        try:
-            bench_sig(name, env)
-        except Exception as exc:
-            print(f"  SIG bench failed: {exc}")
-        try:
-            bench_kdf(name, env)
-        except Exception as exc:
-            print(f"  KDF bench failed: {exc}")
-        try:
-            bench_aead(name, env)
-        except Exception as exc:
-            print(f"  AEAD bench failed: {exc}")
-    consolidate_micro_csv(suite_names, env)
+        for op in ("kem", "sig", "kdf", "aead"):
+            try:
+                _OP_FUNCS[op](name, env)
+            except Exception as exc:
+                print(f"  {op} bench failed: {exc}")
+        all_names.append(name)
+
+    # Matrix suites: selective ops for unique algorithms.
+    for suite_rel, ops, experimental in _MATRIX_SELECTIVE:
+        path = suites_dir / f"{suite_rel}.toml"
+        if not path.exists():
+            print(f"  skipping {suite_rel}: file not found")
+            continue
+        label = f"{suite_rel}" + (" [experimental]" if experimental else "")
+        print(f"\n=== {label} ===")
+        for op in ops:
+            try:
+                _OP_FUNCS[op](suite_rel, env)
+            except Exception as exc:
+                print(f"  {op} bench failed{'  [experimental — skipping]' if experimental else ''}: {exc}")
+        all_names.append(suite_rel)
+
+    consolidate_micro_csv(all_names, env)
 
 
 def consolidate_micro_csv(suite_names: list[str], env: dict) -> None:
     """Read per-suite raw CSVs and write combined results/tables/micro.csv."""
     all_rows: list[dict] = []
     for name in suite_names:
+        safe = _safe_name(name)
         for op_type in ("kem", "sig", "kdf", "aead"):
-            path = _RESULTS_DIR / f"micro_{name}_{op_type}.csv"
+            path = _RESULTS_DIR / f"micro_{safe}_{op_type}.csv"
             if not path.exists():
                 continue
             with open(path) as fh:
