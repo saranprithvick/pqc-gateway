@@ -577,18 +577,25 @@ def run_latency(config: str, profile: str, env: dict) -> None:
     rows = [{"config": config, "profile": profile, "latency_ns": v} for v in latencies]
     write_csv(_RAW_DIR / f"latency_{config}_{profile}.csv", rows, env)
 
+    # delivery_ratio: fraction of injected frames that produced a latency sample.
+    # Include it in every summary row so the column order matches the C0 rows
+    # (C0 writes delivery_ratio first; without it C1/C2/C3 rows shift under the
+    # C0-established CSV header when the file is appended).
+    delivery_ratio = round(len(latencies) / _N_DATA_FRAMES, 4)
+
     try:
         st = compute_stats(latencies)
         print(
-            f"  [B] {config}/{profile}: n={st.n} "
+            f"  [B] {config}/{profile}: n={st.n} delivery={delivery_ratio:.1%} "
             f"median={st.median_ns/1e6:.2f}ms p95={st.p95_ns/1e6:.2f}ms p99={st.p99_ns/1e6:.2f}ms"
         )
-        summary = [{"config": config, "profile": profile, **st.as_dict("latency_")}]
+        summary = [{"config": config, "profile": profile,
+                    "delivery_ratio": delivery_ratio, **st.as_dict("latency_")}]
         write_csv(_TABLES_DIR / "latency.csv", summary, env)
     except ValueError:
         sn = compute_small_n_stats(latencies)
         print(
-            f"  [B] {config}/{profile}: n={sn.n} (small) "
+            f"  [B] {config}/{profile}: n={sn.n} (small) delivery={delivery_ratio:.1%} "
             f"median={sn.median_ns/1e6:.2f}ms"
         )
 
@@ -873,8 +880,9 @@ async def _measure_full_rekey(
     peer_link = emulator.peer_half
     sink: asyncio.Queue[CANFrame] = asyncio.Queue()
 
-    rekey_cfg = RekeyConfig(rekey_timeout_ms=400, rekey_max_retries=5,
-                            grace_period_s=2.0, grace_period_records=64)
+    # retry_budget = 400ms × (3+1) = 1600ms < grace_period_s=5.0 ✓
+    rekey_cfg = RekeyConfig(rekey_timeout_ms=400, rekey_max_retries=3,
+                            grace_period_s=5.0, grace_period_records=64)
 
     with CanAdapter(chan) as can, CanAdapter(chan) as injector:
         gw = Gateway(suite, gw_id, can, gw_link, rekey_config=rekey_cfg,
