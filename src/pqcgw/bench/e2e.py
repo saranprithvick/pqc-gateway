@@ -28,12 +28,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gc
+import logging
 import os
 import sys
 import time
 import tracemalloc
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 _SRC = Path(__file__).resolve().parents[3] / "src"
 if str(_SRC) not in sys.path:
@@ -142,7 +145,17 @@ async def _one_handshake(
     net_cfg: NetworkConfig,
     chan: str,
 ) -> dict:
-    """Run one full handshake and return a row dict with timing breakdown."""
+    """Run one full handshake and return a row dict with timing breakdown.
+
+    The peer runs handshake() then serve_pending_handshake() so that a lost
+    FINISHED_R can be recovered when the gateway retransmits FINISHED_I (§15
+    item 20).  Outer timeout is set above the gateway's worst-case retry budget:
+      HELLO_I phase:    6 attempts × 200ms×2^(0..5) = 6.2 s
+      FINISHED_I phase: same = 6.2 s
+      Total worst case: ≈ 12.4 s  →  budget = 15 s
+    """
+    _BUDGET_S = 15.0
+
     suite = load_suite(_SUITE_DIR / f"{suite_name}.toml")
     gw_id, peer_id = _make_identities(suite)
     gw_hook = SummingHook()
@@ -170,19 +183,28 @@ async def _one_handshake(
             crypto_hook=peer_hook,
         )
 
+        async def _peer_serve() -> None:
+            """Run handshake then serve duplicate FINISHED_I for the full retry budget."""
+            try:
+                await peer.handshake()
+            except Exception as exc:
+                log.debug("_one_handshake peer: handshake() raised %s", exc)
+                return
+            await peer.serve_pending_handshake(timeout_s=_BUDGET_S)
+
         t_wall_start = time.perf_counter_ns()
         gw_task = asyncio.create_task(gw.handshake())
-        peer_task = asyncio.create_task(peer.handshake())
+        peer_task = asyncio.create_task(_peer_serve())
+
+        t_wall_end = 0
         try:
-            await asyncio.wait_for(
-                asyncio.gather(gw_task, peer_task),
-                timeout=10.0,
-            )
+            await asyncio.wait_for(gw_task, timeout=_BUDGET_S)
             t_wall_end = time.perf_counter_ns()
-        except (asyncio.TimeoutError, Exception) as exc:
-            gw_task.cancel()
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as exc:
+            return {"success": False, "error": type(exc).__name__ + ": " + str(exc)}
+        finally:
             peer_task.cancel()
-            return {"success": False, "error": str(exc)}
+            await asyncio.gather(peer_task, return_exceptions=True)
 
     wall_ns = t_wall_end - t_wall_start
     crypto_ns = gw_hook.total_ns + peer_hook.total_ns
@@ -216,6 +238,7 @@ def run_handshake_trials(
         return
 
     rows: list[dict] = []
+    failure_rows: list[dict] = []
     failures = 0
     chan = _unique_channel()
 
@@ -229,10 +252,22 @@ def run_handshake_trials(
             )
         except Exception as exc:
             failures += 1
+            reason = type(exc).__name__ + ": " + str(exc)
+            log.debug("Trial %d/%d failed (outer exception): %s", i, n_trials, reason)
+            failure_rows.append({
+                "config": config, "profile": profile, "trial": i, "seed": seed,
+                "reason": reason,
+            })
             continue
 
         if not result.get("success"):
             failures += 1
+            reason = result.get("error", "unknown")
+            log.debug("Trial %d/%d failed: %s", i, n_trials, reason)
+            failure_rows.append({
+                "config": config, "profile": profile, "trial": i, "seed": seed,
+                "reason": reason,
+            })
             continue
 
         rows.append({
@@ -272,6 +307,10 @@ def run_handshake_trials(
         }]
         write_csv(_TABLES_DIR / "handshake.csv", summary, env)
         write_csv(_RAW_DIR / f"handshake_{config}_{profile}.csv", rows, env)
+
+    if failure_rows:
+        write_csv(_RAW_DIR / f"handshake_failures_{config}_{profile}.csv", failure_rows, env)
+        print(f"      {len(failure_rows)} failure(s) written to handshake_failures_{config}_{profile}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -315,30 +354,37 @@ async def _run_latency(
         _peer_hs = asyncio.create_task(peer.handshake())
         await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=10.0)
 
-        # Emit frames at scenario rate
+        # Emit frames at scenario rate.
+        # The sender CanAdapter is on the same channel but a separate bus object;
+        # the gateway's bus receives frames injected by the sender.
+        # Close it explicitly in a finally so its Notifier (if any) is stopped.
         profile = TrafficProfile(can_id=0x100, rate_hz=rate_hz, dlc=_FRAME_DLC,
                                  payload_pattern="counter")
-        node = LegacyNode(CanAdapter(chan), [profile])
         frame_q: asyncio.Queue[CANFrame] = asyncio.Queue()
-
-        emit_task = asyncio.create_task(
-            node.emit_loop(0, rate_hz, n_frames, frame_q)
-        )
-        gw_task = asyncio.create_task(gw.run(n_frames=n_frames))
-        peer_task = asyncio.create_task(peer.run(n_frames=n_frames))
-
+        sender_can = CanAdapter(chan)
         try:
-            await asyncio.wait_for(
-                asyncio.gather(emit_task, gw_task, peer_task),
-                timeout=max(5.0, n_frames / rate_hz + 2.0),
+            node = LegacyNode(sender_can, [profile])
+
+            emit_task = asyncio.create_task(
+                node.emit_loop(0, rate_hz, n_frames, frame_q)
             )
-        except asyncio.TimeoutError:
-            # With packet loss the peer may never receive all n_frames.
-            # Cancel remaining tasks and return whatever was collected.
-            for t in (emit_task, gw_task, peer_task):
-                t.cancel()
-            await asyncio.gather(emit_task, gw_task, peer_task,
-                                 return_exceptions=True)
+            gw_task = asyncio.create_task(gw.run(n_frames=n_frames))
+            peer_task = asyncio.create_task(peer.run(n_frames=n_frames))
+
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(emit_task, gw_task, peer_task),
+                    timeout=max(5.0, n_frames / rate_hz + 2.0),
+                )
+            except asyncio.TimeoutError:
+                # With packet loss the peer may never receive all n_frames.
+                # Cancel remaining tasks and return whatever was collected.
+                for t in (emit_task, gw_task, peer_task):
+                    t.cancel()
+                await asyncio.gather(emit_task, gw_task, peer_task,
+                                     return_exceptions=True)
+        finally:
+            sender_can.close()
 
     return tracker.latencies_ns
 
@@ -552,16 +598,16 @@ async def _measure_light_rekey(suite_name: str, net_cfg: NetworkConfig, chan: st
         can.send(CANFrame(can_id=0x100, dlc=8, data=b"\x00" * 8))
         await asyncio.sleep(0.1)  # let the frame be processed
 
-        # Trigger and time light rekey (loop is running, will process it next iteration)
+        # Trigger and time light rekey via asyncio.Event (no polling).
+        # request_light_rekey_with_event() sets the flag AND returns an Event
+        # that the run() loop fires when the epoch actually advances.
         old_epoch = gw._sm.epoch if gw._sm else 0
         t0 = time.perf_counter_ns()
-        gw.request_light_rekey()
-
-        # Poll for epoch change (gateway loop runs every ~20 ms)
-        for _ in range(300):
-            await asyncio.sleep(0.01)
-            if gw._sm and gw._sm.epoch != old_epoch:
-                break
+        epoch_event = gw.request_light_rekey_with_event()
+        try:
+            await asyncio.wait_for(epoch_event.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass  # epoch may still have advanced; check below
 
         t1 = time.perf_counter_ns()
         new_epoch = gw._sm.epoch if gw._sm else -1
@@ -646,14 +692,16 @@ def run_rekey_cost(config: str, profile: str, env: dict) -> None:
         return
 
     suite_name = _CONFIGS[config]
-    net_cfg = _net_config(profile)
-    chan = _unique_channel()
+    base_seed = 42
 
-    # Light rekey cost × 20
+    # Light rekey cost × 20 — each trial uses a unique seed and channel so
+    # loss patterns are independent (fix for all-same-seed clustering).
     light_times: list[int] = []
     for i in range(_REKEY_LIGHT_TRIALS):
+        net_cfg_i = _net_config(profile, seed=base_seed + i)
+        chan_i = _unique_channel()
         try:
-            r = asyncio.run(_measure_light_rekey(suite_name, net_cfg, chan), debug=False)
+            r = asyncio.run(_measure_light_rekey(suite_name, net_cfg_i, chan_i), debug=False)
             light_times.append(r["rekey_time_ns"])
         except Exception as exc:
             print(f"      light rekey trial {i} failed: {exc}")
@@ -664,14 +712,16 @@ def run_rekey_cost(config: str, profile: str, env: dict) -> None:
             f"  [D] {config}/{profile}: light rekey (n={st.n}) "
             f"median={st.median_ns/1e6:.1f}ms min={st.min_ns/1e6:.1f}ms max={st.max_ns/1e6:.1f}ms"
         )
-        rows = [{"config": config, "profile": profile, "rekey_ns": t} for t in light_times]
+        rows = [{"config": config, "profile": profile, "trial": i, "seed": base_seed + i, "rekey_ns": t}
+                for i, t in enumerate(light_times)]
         write_csv(_RAW_DIR / f"rekey_light_{config}_{profile}.csv", rows, env)
         write_csv(_TABLES_DIR / "rekey_cost.csv",
                   [{"config": config, "profile": profile, "type": "light", **st.as_dict("time_")}], env)
 
     # Interval sweep: only for C3 on ideal profile (§plan sub-run D)
     if config == "c3" and profile == "ideal":
-        _run_rekey_interval_sweep(suite_name, net_cfg, env)
+        net_ideal = _net_config("ideal", seed=base_seed)
+        _run_rekey_interval_sweep(suite_name, net_ideal, env)
 
 
 # ---------------------------------------------------------------------------
@@ -725,6 +775,12 @@ def run(
     """
     env = collect_env()
     _subs = sub if sub is not None else {"A", "B", "C", "D"}
+
+    # Unlink all summary tables so each run starts from a clean slate.
+    # Raw files are kept (timestamped in filenames) so previous runs are not lost.
+    for _fname in ["handshake.csv", "latency.csv", "throughput.csv",
+                   "rekey_cost.csv", "rekey_sweep.csv"]:
+        (_TABLES_DIR / _fname).unlink(missing_ok=True)
 
     # Write overhead decomposition table (always overwrite — it's deterministic)
     overhead_path = _TABLES_DIR / "overhead.csv"

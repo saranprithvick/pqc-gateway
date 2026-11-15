@@ -32,7 +32,7 @@ _OUT_CSV = _ROOT / "results" / "tables" / "contact_window.csv"
 
 # Default parameter grid (§8: illustrative, not standards-derived)
 _RANGES_M = [100, 200, 300]            # communication range metres
-_SPEEDS_KMPH = [30, 60, 120, 200]      # relative speed km/h
+_SPEEDS_KMPH = [50, 100, 150, 200]     # relative speed km/h
 _CONFIGS = ["c1", "c2", "c3"]
 _PROFILES = ["ideal", "delay5", "delay20", "delay50", "loss1", "loss5", "bw6000"]
 

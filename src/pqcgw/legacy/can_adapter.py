@@ -7,6 +7,7 @@ cross-test contamination.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from types import TracebackType
 from typing import Optional
@@ -25,6 +26,8 @@ class CanAdapter:
         self._channel = channel
         self._is_fd = is_fd
         self._bus = can.Bus(interface="virtual", channel=channel, fd=is_fd)
+        self._async_reader: Optional[can.AsyncBufferedReader] = None
+        self._notifier: Optional[can.Notifier] = None
 
     # ------------------------------------------------------------------
     # Conversion helpers
@@ -82,7 +85,40 @@ class CanAdapter:
             log.warning("Dropping malformed CAN message: %s", exc)
             return None
 
+    def _ensure_async_reader(self) -> None:
+        """Lazy-init the AsyncBufferedReader + Notifier for async receive.
+
+        Must be called from within a running asyncio event loop.  Passing the
+        running loop to Notifier causes _rx_thread to use call_soon_threadsafe,
+        so AsyncBufferedReader.on_message_received (which calls put_nowait) runs
+        in the asyncio thread rather than the Notifier background thread.
+        """
+        if self._async_reader is None:
+            loop = asyncio.get_running_loop()
+            self._async_reader = can.AsyncBufferedReader()
+            self._notifier = can.Notifier(self._bus, [self._async_reader], timeout=0.1, loop=loop)
+
+    async def recv_async(self) -> Optional[CANFrame]:
+        """Return next CAN frame, waiting until one arrives (cancellation-safe).
+
+        Lazy-inits the Notifier on first call.  Drops malformed frames and waits
+        for the next one.  Respects asyncio task cancellation via the underlying
+        asyncio.Queue.get() await.
+        """
+        self._ensure_async_reader()
+        while True:
+            msg = await self._async_reader.get_message()
+            try:
+                return self._from_msg(msg)
+            except ValueError as exc:
+                log.warning("Dropping malformed CAN message: %s", exc)
+
     def close(self) -> None:
+        if self._notifier is not None:
+            self._notifier.stop()
+            self._notifier = None
+        # Reset reader so a stale handle is not used if close() is called mid-use.
+        self._async_reader = None
         self._bus.shutdown()
 
     # Context-manager support

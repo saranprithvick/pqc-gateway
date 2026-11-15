@@ -139,6 +139,9 @@ class Gateway:
         # Created in run() (needs event loop)
         self._hs_queue: Optional[asyncio.Queue] = None
 
+        # Epoch-change event for bench rekey measurement (one-shot; bench harness only)
+        self._epoch_changed_event: Optional[asyncio.Event] = None
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -195,6 +198,18 @@ class Gateway:
     def request_full_rekey(self) -> None:
         """Schedule a full rekey on the next run-loop iteration."""
         self._manual_full_rekey = True
+
+    def request_light_rekey_with_event(self) -> asyncio.Event:
+        """Schedule a light rekey and return an Event that fires when the epoch advances.
+
+        Bench harness only.  The Event is one-shot: cleared by the run loop
+        after the epoch changes.  Calling this while a rekey is already in
+        progress is undefined behaviour.
+        """
+        event = asyncio.Event()
+        self._epoch_changed_event = event
+        self._manual_light_rekey = True
+        return event
 
     def _set_epoch_for_testing(self, epoch: int) -> None:
         """Test-only: force the current SM epoch to trigger the epoch-254 guard."""
@@ -324,23 +339,24 @@ class Gateway:
         finally:
             self._buffering = False
             if not buf_task.done():
-                done, _ = await asyncio.wait({buf_task}, timeout=0.15)
-                if not done:
-                    buf_task.cancel()
-                    try:
-                        await buf_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
+                buf_task.cancel()
+                try:
+                    await buf_task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
     async def _buffer_can(self) -> None:
-        """Read CAN frames into the pre-session buffer while _buffering is True."""
-        loop = asyncio.get_running_loop()
-        while self._buffering:
-            frame = await loop.run_in_executor(None, self._can.receive, 0.05)
-            if frame is not None:
-                if len(self._pre_session_buf) == self._pre_session_buf.maxlen:
-                    self._pre_session_drops += 1
-                self._pre_session_buf.append(frame)
+        """Buffer CAN frames that arrive during handshake (§15 item 20).
+
+        Runs until cancelled by handshake() finally block.  Uses recv_async()
+        so no thread-pool thread is blocked; cancellation is instantaneous at
+        the asyncio await point.
+        """
+        while True:
+            frame = await self._can.recv_async()
+            if len(self._pre_session_buf) == self._pre_session_buf.maxlen:
+                self._pre_session_drops += 1
+            self._pre_session_buf.append(frame)
 
     # ------------------------------------------------------------------
     # Data-path helpers
@@ -521,6 +537,10 @@ class Gateway:
         n_frames: stop after forwarding this many I2R frames (for tests).
         Pass None to run indefinitely (until error).
         If handshake() was already called on this instance, skip it here.
+
+        CAN and link receives run as concurrent asyncio tasks feeding a shared
+        event queue; the main loop waits on this queue with a 10 ms timeout so
+        rekey triggers are checked at least every 10 ms even when idle.
         """
         if self._sm is None:
             await self.handshake()
@@ -531,17 +551,35 @@ class Gateway:
         self._bytes_sealed = 0
         self._full_rekey_attempts = 0
 
-        loop = asyncio.get_running_loop()
+        # Concurrent reader tasks feed a unified event queue.
+        # Pre-seed with buffered pre-session frames so they go through the same
+        # main loop path (trigger checks, REKEY_ACK interleaving) as live frames.
+        _evt_q: asyncio.Queue = asyncio.Queue()
 
-        # Flush pre-session buffer (§15 item 20)
-        frames_sent = 0
         for frame in list(self._pre_session_buf):
-            await self.send_frame(frame)
-            frames_sent += 1
+            _evt_q.put_nowait(("can", frame))
         self._pre_session_buf.clear()
 
+        async def _can_reader() -> None:
+            while True:
+                frame = await self._can.recv_async()
+                await _evt_q.put(("can", frame))
+
+        async def _link_reader() -> None:
+            while True:
+                raw = await self._link.recv(timeout=5.0)
+                if raw is not None:
+                    await _evt_q.put(("link", raw))
+
+        _can_task = asyncio.create_task(_can_reader())
+        _link_task = asyncio.create_task(_link_reader())
+
+        frames_sent = 0
+
         try:
-            while n_frames is None or frames_sent < n_frames:
+            while (n_frames is None
+                   or frames_sent < n_frames
+                   or self._has_pending_work()):
                 # -- 1. Manual rekey requests --
                 if (self._manual_light_rekey
                         and not self._full_rekey_pending
@@ -608,15 +646,17 @@ class Gateway:
                         for frame in self._flush_pending():
                             await self.send_frame(frame)
 
-                # -- 6. I2R: CAN → peer --
-                frame = await loop.run_in_executor(None, self._can.receive, 0.01)
-                if frame is not None:
-                    await self.send_frame(frame)
-                    frames_sent += 1
+                # -- 6+7. Wait for next event: CAN frame or link message --
+                try:
+                    kind, value = await asyncio.wait_for(_evt_q.get(), timeout=0.010)
+                except asyncio.TimeoutError:
+                    continue
 
-                # -- 7. R2I: peer → CAN --
-                raw = await self._link.recv(timeout=0.01)
-                if raw is not None:
+                if kind == "can":
+                    await self.send_frame(value)
+                    frames_sent += 1
+                else:  # "link"
+                    raw = value
                     if len(raw) < 1:
                         self._malformed_drops += 1
                     else:
@@ -627,10 +667,20 @@ class Gateway:
                             else:
                                 self._malformed_drops += 1
                         elif t == _T_DATA:
+                            old_epoch = self._sm.epoch if self._sm else -1
                             await self._handle_inbound(body)
+                            # Fire one-shot epoch-change event for bench rekey measurement
+                            if (self._sm is not None
+                                    and self._sm.epoch != old_epoch
+                                    and self._epoch_changed_event is not None):
+                                self._epoch_changed_event.set()
+                                self._epoch_changed_event = None
                         else:
                             self._malformed_drops += 1
         finally:
+            _can_task.cancel()
+            _link_task.cancel()
+            await asyncio.gather(_can_task, _link_task, return_exceptions=True)
             if self._full_rekey_task is not None and not self._full_rekey_task.done():
                 self._full_rekey_task.cancel()
                 try:
@@ -641,6 +691,40 @@ class Gateway:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _has_pending_work(self) -> bool:
+        """True if the run loop must continue even after n_frames are forwarded.
+
+        Conditions (all checked; rekey timeout exits via AlertError, not here):
+          - Light rekey awaiting ACK: exit only after REKEY_ACK is received
+            (epoch would otherwise stay at the pre-rekey value).
+          - Full rekey task running: _do_full_rekey is in flight.
+          - CounterExhausted pending buffer non-empty: frames are queued for
+            flush after the next rekey completes; draining them requires at
+            least one more outbound message exchange.
+          - SM outbound queue non-empty: a REKEY_REQ retransmit is pending;
+            step 4 of the loop drains it, but only while the loop is running.
+          - A trigger is about to fire: the loop needs one more iteration to
+            execute step 2 (trigger check), initiate the rekey, and then wait
+            for REKEY_ACK — otherwise epoch would never advance for the last
+            batch of records sealed exactly at the threshold.
+        """
+        if self._sm is None:
+            return False
+        if self._sm.rekey_state == RekeyState.REQ_SENT:
+            return True
+        if self._full_rekey_pending:
+            return True
+        if bool(self._pending):
+            return True
+        if self._sm._outbound_queue:  # noqa: SLF001
+            return True
+        # Trigger about to fire on the next iteration's step-2 check
+        if (not self._full_rekey_pending
+                and self._sm.rekey_state == RekeyState.IDLE
+                and self._triggers_fire()):
+            return True
+        return False
 
     def _triggers_fire(self) -> bool:
         t = self._trigger

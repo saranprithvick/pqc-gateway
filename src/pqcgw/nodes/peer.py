@@ -207,6 +207,35 @@ class ModernPeer:
         self._hs_end_ns = time.perf_counter_ns()
         log.debug("Peer: session established session_id=%s", responder.session_id.hex())
 
+    async def serve_pending_handshake(self, timeout_s: float = 15.0) -> None:
+        """Keep serving duplicate FINISHED_I until timeout or task cancellation.
+
+        Called by the benchmark harness after handshake() completes to allow the
+        gateway to retransmit FINISHED_I if its FINISHED_R was lost (5% loss
+        scenarios).  Resends the cached FINISHED_R byte-for-byte (§15 item 20).
+        No new session is created.  This is a bench-harness-only method and must
+        not be called in production paths.
+        """
+        if self._cached_finished_r is None:
+            return  # handshake() did not complete; nothing to serve
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return
+            raw = await self._link.recv(timeout=min(remaining, 1.0))
+            if raw is None:
+                continue
+            if len(raw) < 2:
+                continue
+            t, body = raw[0], raw[1:]
+            if t == _T_FINISHED_I and body == self._cached_finished_i:
+                log.debug("Peer.serve_pending_handshake: retransmitting FINISHED_R")
+                await self._link.send(bytes([_T_FINISHED_R]) + self._cached_finished_r)
+            # Other types: ignore silently
+
     # ------------------------------------------------------------------
     # Data-path helpers
     # ------------------------------------------------------------------

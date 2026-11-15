@@ -353,14 +353,21 @@ def test_e2e_c1_full_rekey_hello_r_lost(can_channel: str) -> None:
                 gateway.request_full_rekey()
                 await _inject(can_channel, frames)
 
-            await asyncio.wait_for(
-                asyncio.gather(
-                    gateway.run(n_frames=5),
-                    peer.run(n_frames=5),
-                    _trigger_and_inject(),
-                ),
-                timeout=30.0,
-            )
+            # Peer runs indefinitely so it can respond to full-rekey HS messages
+            # (HELLO_I, FINISHED_I) even after n_frames DATA records arrive.
+            # Cancelled once the gateway finishes.
+            peer_task = asyncio.create_task(peer.run(n_frames=None))
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        gateway.run(n_frames=5),
+                        _trigger_and_inject(),
+                    ),
+                    timeout=30.0,
+                )
+            finally:
+                peer_task.cancel()
+                await asyncio.gather(peer_task, return_exceptions=True)
         assert gateway._sm is not None
         return [sink.get_nowait() for _ in range(sink.qsize())]
 
@@ -400,14 +407,20 @@ def test_e2e_c1_full_rekey_finished_r_lost(can_channel: str) -> None:
                 gateway.request_full_rekey()
                 await _inject(can_channel, frames)
 
-            await asyncio.wait_for(
-                asyncio.gather(
-                    gateway.run(n_frames=5),
-                    peer.run(n_frames=5),
-                    _trigger_and_inject(),
-                ),
-                timeout=30.0,
-            )
+            # Peer runs indefinitely so it can respond to full-rekey HS messages
+            # even after n_frames DATA records arrive.  Cancelled once gateway finishes.
+            peer_task = asyncio.create_task(peer.run(n_frames=None))
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        gateway.run(n_frames=5),
+                        _trigger_and_inject(),
+                    ),
+                    timeout=30.0,
+                )
+            finally:
+                peer_task.cancel()
+                await asyncio.gather(peer_task, return_exceptions=True)
         return [sink.get_nowait() for _ in range(sink.qsize())]
 
     received = asyncio.run(_scenario())
@@ -524,15 +537,14 @@ def test_peer_forged_new_session_header_no_switch() -> None:
 # ===========================================================================
 
 def test_full_rekey_failed_attempt_old_session_continues(can_channel: str) -> None:
-    """First full-rekey attempt fails (HELLO_R from peer is dropped); old session
-    delivers 3 frames while the failed attempt is still in progress.
+    """Full-rekey attempt fails (HELLO_R always dropped); old session delivers all
+    3 frames; AlertError is raised after max_attempts are exhausted.
 
     Design: wrap the PEER's outbound link so HELLO_R is dropped before the
-    gateway receives it.  The gateway's _do_full_rekey() times out.  During
-    that window, 3 CAN frames are injected and forwarded on the old session.
-    gateway.run(n_frames=3) exits normally (no AlertError) because it finishes
-    before the full-rekey task failure is processed, and the finally block
-    cancels the pending task cleanly.
+    gateway receives it.  The gateway's _do_full_rekey() times out every
+    attempt.  3 CAN frames are injected on the OLD session (which still
+    works), then _has_pending_work() keeps the loop alive until AlertError
+    is raised after full_rekey_max_attempts failures.
     """
     frames = _make_frames_mb5(3)
 
@@ -541,10 +553,7 @@ def test_full_rekey_failed_attempt_old_session_continues(can_channel: str) -> No
 
     async def _scenario():
         suite, gw_id, peer_id = _make_identities("classical")
-        # gw_link: gateway sends via this link → arrives at peer
-        # peer_link_inner: peer sends via this inner link → arrives at gateway
         gw_link, peer_link_inner = LinkEmulator.make_pair(_ideal_config())
-        # Wrap peer's outbound link: drop HELLO_R peer→gateway, pass everything else
         drop_peer_link = _DropAllWhere(peer_link_inner, lambda _: False)
         cfg = RekeyConfig(grace_period_s=5.0, grace_period_records=100)
         sink: asyncio.Queue[CANFrame] = asyncio.Queue()
@@ -560,25 +569,35 @@ def test_full_rekey_failed_attempt_old_session_continues(can_channel: str) -> No
             session_before = [None]
 
             async def _control():
-                await asyncio.sleep(0.1)   # let handshake complete
+                await asyncio.sleep(0.1)
                 session_before[0] = gateway._sm._session_id
-                # Activate drop: HELLO_R from peer will not reach gateway
                 drop_peer_link._pred = _is_hello_r
-                # Trigger first full-rekey attempt (will fail: HELLO_R dropped)
                 gateway.request_full_rekey()
-                # Inject frames immediately; they travel on the OLD session while
-                # the full-rekey attempt is still waiting for HELLO_R (~400ms budget)
                 await _inject(can_channel, frames)
 
-            await asyncio.wait_for(
-                asyncio.gather(
-                    gateway.run(n_frames=3),
-                    peer.run(n_frames=3),
-                    _control(),
-                ),
-                timeout=15.0,
-            )
-        # Old session delivered all 3 frames before the failed attempt timed out
+            # _has_pending_work() keeps the loop alive while _full_rekey_pending.
+            # After full_rekey_max_attempts failures AlertError is raised.
+            # Peer runs indefinitely so it can respond to old-session DATA records;
+            # cancelled in the finally block.
+            gw_task = asyncio.create_task(gateway.run(n_frames=3))
+            peer_task = asyncio.create_task(peer.run(n_frames=None))
+            ctrl_task = asyncio.create_task(_control())
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(gw_task, ctrl_task),
+                    timeout=15.0,
+                )
+                pytest.fail("Expected AlertError from exhausted full-rekey attempts")
+            except AlertError:
+                pass  # expected: 3 failed attempts → session closed
+            finally:
+                for t in (gw_task, peer_task, ctrl_task):
+                    if not t.done():
+                        t.cancel()
+                await asyncio.gather(gw_task, peer_task, ctrl_task,
+                                     return_exceptions=True)
+
+        # Old session delivered all 3 frames before AlertError
         received = [sink.get_nowait() for _ in range(sink.qsize())]
         assert len(received) == 3
         assert session_before[0] is not None

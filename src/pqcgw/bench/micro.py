@@ -201,6 +201,7 @@ def bench_aead(suite_name: str, env: dict) -> None:
 
 def _write(name: str, rows: list[dict], env: dict) -> None:
     path = _RESULTS_DIR / f"{name}.csv"
+    path.unlink(missing_ok=True)  # overwrite per bench run
     write_csv(path, rows, env)
     print(f"  → {path}")
 
