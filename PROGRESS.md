@@ -53,9 +53,45 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M7 complete (2026-11-13). 795 tests pass on branch m7-benchmarks.
-Pending: user approval to merge m7-benchmarks to main and tag m7-done.
-Then start M8: README, docs/PROTOCOL.md, THREAT_MODEL.md, LIMITATIONS.md, results summary tables.
+M7 complete (committed b13b641 on main, 2026-11-15). 798 tests pass.
+`make bench` running (started 2026-11-15) — results will be in results/.
+After bench completes: report acceptance checks (handshake latency, loss5
+success rate, rekey timing, contact window); then start M8: README,
+docs/PROTOCOL.md, THREAT_MODEL.md, LIMITATIONS.md, results summary tables.
+
+## Post-M7 bug-fix pass (commit b13b641, 2026-11-15, 798 tests pass)
+
+Five run-loop correctness fixes and 3 regression tests added:
+
+**Fix 1 – Notifier thread-safety**: `can.Notifier` now receives
+`loop=asyncio.get_running_loop()` so its background `_rx_thread` uses
+`call_soon_threadsafe`. Without this fix `AsyncBufferedReader.put_nowait`
+ran from outside the event loop — not thread-safe, frames silently dropped.
+
+**Fix 2 – Pre-session CAN frame bypass of trigger checks**: frames buffered
+in `_pre_session_buf` during the handshake are now pre-seeded into `_evt_q`
+(not flushed in a bare for-loop before the while-loop). This ensures trigger
+checks (record_count etc.) apply to those frames.
+
+**Fix 3 – Early loop exit before REKEY_ACK**: the while condition now
+includes `_has_pending_work()` so the loop continues while: light rekey
+REQ_SENT, full_rekey_pending, `_pending` non-empty, SM outbound queue
+non-empty, or trigger about to fire. Rekey timeout still exits via AlertError.
+
+**Fix 4 – contact_window.py speed grid**: set to `[50, 100, 150, 200]` km/h.
+
+**Fix 5 – Summary table duplication**: `micro.py` unlinks summary CSV before
+writing so re-runs don't append duplicate rows.
+
+**Additional**: `e2e._run_latency` LegacyNode sender CanAdapter wrapped in
+`try/finally` to ensure `sender_can.close()` is always called.
+
+**Test updates**:
+- `test_regression_gateway.py`: 3 regression tests for Fixes 1–3.
+- `test_e2e_link.py`: full-rekey tests with `peer.run(n_frames=None)` +
+  cancel pattern so the peer stays alive for FINISHED_I handling.
+- `test_full_rekey_failed_attempt_old_session_continues`: updated to expect
+  `AlertError` after max_attempts (new semantics from Fix 3).
 
 ## M7 deliverables (commits m7-01 through m7-09, 2026-11-13)
 
