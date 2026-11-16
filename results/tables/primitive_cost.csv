@@ -1,0 +1,13 @@
+# python_version: 3.13.2
+# os: Darwin
+# os_version: 25.6.0
+# cpu: arm
+# liboqs_version: 0.16.0
+# cryptography_version: 50.0.2
+# git_commit: 23f428b
+# seed: 0
+# timestamp: 2026-11-16T18:53:31Z
+config,suite,cost_median_ns,cost_p95_ns,cost_p99_ns,cost_n
+c1,classical,328125.0,335710.1,341375.84,1000
+c2,pqc,346021.0,469708.05,559484.41,1000
+c3,hybrid,657937.5,790497.6,860356.91,1000

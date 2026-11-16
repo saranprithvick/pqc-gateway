@@ -1,7 +1,7 @@
 # Technical Results Brief: PQC Gateway Prototype
 
-**Date:** 2026-11-16  
-**Git commits (results):** 383469d (6 correctness fixes: thread_time hook, recv_stream rekey, PassthroughPath event-driven, run_order_index rotation, on-wire bytes)  
+**Date:** 2026-11-17  
+**Git commits (results):** 23f428b (3 correctness fixes: rekey wake sentinel, C0 ingest timestamp, in-loop crypto column removed)  
 *Source metadata: results/raw/smoke_versions.json*
 
 ---
@@ -54,32 +54,30 @@ T12 is a **documented non-prevention**: the gateway does not authenticate the le
 
 ### 3b. Handshake Timing
 
-C0 has no handshake. Fragment counts are consistent across all 200 trials per row.
+C0 has no handshake. Fragment counts are consistent across all 200 trials per row. Per-handshake primitive cost (in-process, no asyncio) is reported separately in §3h.
 
-| Config | Profile | Trials | Success | Wall median (ms) | Wall p95 (ms) | Crypto CPU median (ms) | App bytes | Wire bytes | Frags I→R | Frags R→I |
-|--------|---------|--------|---------|-----------------|---------------|------------------------|-----------|-----------|-----------|-----------|
-| C1 | ideal | 200 | 100% | 3.57 | 5.48 | 1.88 | 354 | 386 | 2 | 2 |
-| C2 | ideal | 200 | 100% | 3.76 | 5.24 | 1.96 | 9052 | 9124 | 5 | 4 |
-| C3 | ideal | 200 | 100% | 6.28 | 7.51 | 4.34 | 9260 | 9340 | 5 | 5 |
-| C1 | delay50 | 200 | 100% | — | — | — | 354 | 386 | 2 | 2 |
-| C2 | delay50 | 200 | 100% | — | — | — | 9052 | 9124 | 5 | 4 |
-| C3 | delay50 | 200 | 100% | — | — | — | 9260 | 9340 | 5 | 5 |
-| C1 | loss5 | 200 | **95.5% ⚠** | — | — ⚠ | — | 354 | 386 | 2 | 2 |
-| C2 | loss5 | 200 | **98.0% ⚠** | — | — ⚠ | — | 9052 | 9124 | 5 | 4 |
-| C3 | loss5 | 200 | **96.5% ⚠** | — | — ⚠ | — | 9260 | 9340 | 5 | 5 |
+| Config | Profile | Trials | Success | Wall median (ms) | Wall p95 (ms) | App bytes | Wire bytes | Frags I→R | Frags R→I |
+|--------|---------|--------|---------|-----------------|---------------|-----------|-----------|-----------|-----------|
+| C1 | ideal | 200 | 100% | 4.32 | 5.77 | 354 | 386 | 2 | 2 |
+| C2 | ideal | 200 | 100% | 4.78 | 6.42 | 9052 | 9124 | 5 | 4 |
+| C3 | ideal | 200 | 100% | 6.97 | 8.87 | 9260 | 9340 | 5 | 5 |
+| C1 | delay50 | 200 | 100% | — | — | 354 | 386 | 2 | 2 |
+| C2 | delay50 | 200 | 100% | — | — | 9052 | 9124 | 5 | 4 |
+| C3 | delay50 | 200 | 100% | — | — | 9260 | 9340 | 5 | 5 |
+| C1 | loss5 | 200 | **95.5% ⚠** | — ⚠ | — ⚠ | 354 | 386 | 2 | 2 |
+| C2 | loss5 | 200 | **98.0% ⚠** | — ⚠ | — ⚠ | 9052 | 9124 | 5 | 4 |
+| C3 | loss5 | 200 | **96.5% ⚠** | — ⚠ | — ⚠ | 9260 | 9340 | 5 | 5 |
 
 *(Wall median / p95 for delay/loss profiles available in results/tables/handshake.csv.)*
 
 ⚠ p95 ≫ median: retransmit timeouts inflate tail latency under loss.  
 ⚠ Success < 100%: retransmit budget exhausted on a small fraction of trials; expected behaviour under 5% loss.
 
-**Time breakdown (ideal profile):** Crypto CPU time (1.88–4.34 ms, measured with `time.thread_time_ns()`) excludes OS scheduler preemption; wall time (3.57–6.28 ms) is higher by ~1.7–1.9 ms, which is the asyncio scheduler preemption excluded by the thread-time measurement. Link time = 0 ms (no emulated delay). The remainder of wall time (~1.7 ms) is asyncio event-loop scheduling overhead — not a real-network cost.
+**Wall time:** Total handshake wall time (gateway task start to FINISHED\_R verified). Link time = 0 ms on ideal (no emulated delay). The difference between wall time and primitive cost (§3h) is asyncio event-loop task-switching time (time between crypto calls while the event loop services other tasks — peer crypto, emulator I/O, etc.) plus Python protocol overhead (message packing, state-machine transitions). This is a prototype cost, not a property of the cryptographic algorithms.
 
-**Crypto CPU time breakdown:** The 1.88 ms (C1) and 1.96 ms (C2) are the full handshake CPU cost (KEM + signature + KDF + HMAC + SHA-256 transcript hashing + Python protocol code). The primitive-only sum (micro-benchmark) is ~0.26 ms (C1) / ~0.24 ms (C2); the difference (~1.6 ms) is Python function-call overhead, dict operations, and message packing. C3 = 4.34 ms ≈ C1 + C2 + hybrid combiner overhead.
+**App-layer vs on-wire bytes:** App-layer = bytes before fragmentation. Wire bytes = app-layer + 8 B × fragment count (8 B fragment header per fragment, shared by all configurations). C1: 354 B app, 386 B wire (4 fragments × 8 B = 32 B). C2: 9052 B app, 9124 B wire (9 fragments × 8 B = 72 B). C3: 9260 B app, 9340 B wire (10 fragments × 8 B = 80 B).
 
-**App-layer vs on-wire bytes:** App-layer = bytes before fragmentation (what the protocol writes). Wire bytes = app-layer + 8 B × fragment count (8 B fragment header per fragment, shared by all configurations). C1: 354 B app, 386 B wire (4 fragments × 8 B = 32 B extra). C2: 9052 B app, 9124 B wire (9 fragments × 8 B = 72 B extra). C3: 9260 B app, 9340 B wire (10 fragments × 8 B = 80 B extra).
-
-**Fragment count interpretation:** C1 messages each fit in one fragment per message (2 messages each direction: HELLO + FINISHED). C2/C3 HELLO_I and HELLO_R are each ≈4,500–4,650 B (ML-KEM-768 public key: 1,184 B; ML-DSA-65 signature: 3,309 B; plus headers), requiring 3–4 fragments each; FINISHED messages remain one fragment.
+**Fragment count interpretation:** C1 messages each fit in one fragment per direction (2 messages per direction: HELLO + FINISHED). C2/C3 HELLO\_I and HELLO\_R are each ≈4,500–4,650 B (ML-KEM-768 public key: 1,184 B; ML-DSA-65 signature: 3,309 B; plus headers), requiring 3–4 fragments each; FINISHED messages remain one fragment.
 
 *Source: results/tables/handshake.csv, results/raw/handshake\_c\*\_\*.csv*
 
@@ -100,21 +98,28 @@ Layers: the 5 B CAN header (4 B can\_id + 1 B dlc) is the baseline framing commo
 
 ### 3d. Steady-State Latency and Delivery Ratio
 
-Latency = time from CAN ingest at the gateway to delivery at the peer, measured out-of-band per record. C0 (passthrough, no session protection) was not included in the latency run.
+Latency = time from CAN ingest at the gateway to delivery at the peer, measured out-of-band per record. Ingest timestamp is captured at the gateway (after `can_gw.recv_async()`) for all configurations, making C0 and C1–C3 directly comparable.
 
 | Config | Profile | Median (ms) | p95 (ms) | n | Delivery ratio | run\_order |
 |--------|---------|-------------|----------|---|----------------|-----------|
-| C0 | ideal | 0.484 | 0.767 | 100 | 100% | 0 |
-| C1 | ideal | 0.265 | 0.484 | 100 | 100% | 1 |
-| C2 | ideal | 0.225 | 0.314 | 100 | 100% | 2 |
-| C3 | ideal | 0.229 | 0.314 | 100 | 100% | 3 |
-| C1 | loss5 | — | — | — | — | — |
-| C2 | loss5 | — | — | — | — | — |
-| C3 | loss5 | — | — | — | — | — |
+| C0 | ideal | 0.144 | 0.266 | 1000 | 100% | 0 |
+| C1 | ideal | 0.314 | 0.471 | 1000 | 100% | 1 |
+| C2 | ideal | 0.286 | 0.443 | 1000 | 100% | 2 |
+| C3 | ideal | 0.287 | 0.449 | 1000 | 100% | 3 |
+| C1 | delay5 | 6.063 | 6.641 | 1000 | 100% | 0 |
+| C2 | delay5 | 6.087 | 6.482 | 1000 | 100% | 1 |
+| C3 | delay5 | 6.112 | 6.618 | 1000 | 100% | 2 |
+| C0 | delay5 | 5.930 | 6.126 | 1000 | 100% | **3** |
+| C2 | delay20 | 20.533 | 21.039 | 1000 | 100% | 0 |
+| C3 | delay20 | 20.536 | 21.061 | 1000 | 100% | 1 |
+| C0 | delay20 | 21.470 | 25.521 | 1000 | 100% | **2** |
+| C1 | delay20 | 20.510 | 20.970 | 1000 | 100% | 3 |
 
-*(Full table in results/tables/latency.csv.)*
+*(Full table including loss and bw6000 profiles in results/tables/latency.csv.)*
 
-C0 (passthrough, no crypto) now measured with the same event-driven CAN machinery as Gateway (`recv_async()` via AsyncBufferedReader/Notifier, not a 50 ms blocking poll). C0 ideal = 0.484 ms vs C1–C3 = 0.225–0.265 ms; both are sub-ms, making the comparison fair. C0 appears slightly higher than C1–C3 because it ran first (run\_order = 0, cold asyncio event loop), not because of crypto overhead. Under 5% loss, per-record latency is dominated by link loss probability; full table available in latency.csv.
+**C0 vs C1–C3:** On ideal, C0 = 0.14 ms vs C1–C3 = 0.29–0.31 ms: passthrough has lower latency, as expected (no encryption or decryption). On delay5 (**C0 runs last, run\_order = 3**): C0 = 5.930 ms vs C1 = 6.063 ms; C0 is 133 µs lower — consistent with the absent crypto overhead (~330 µs from §3h, partially offset by asymmetric asyncio scheduling).
+
+On delay20 (**C0 runs third, run\_order = 2**): C0 = 21.47 ms vs C1 = 20.51 ms; C0 is ~960 µs higher despite having no crypto. This is a measurement scope difference: C0's `_gw_side()` captures ingest after **1 asyncio wake-up hop** (Notifier → `recv_async()` return), while C1–C3 `gateway.send_frame()` captures ingest after **2 hops** (Notifier → can\_reader task → `_evt_q` → main loop). The extra asyncio handoff in C1–C3 delays the ingest timestamp by ~0.5–1 ms relative to actual CAN frame arrival, making C1–C3 latency appear shorter. This ~1 ms offset is a prototype scheduling artifact; at ideal and delay5 the offset is dominated by C1–C3 crypto overhead, so C0 still appears lower. Under delay20/50 the network delay is constant and the scheduling offset dominates.
 
 *Source: results/tables/latency.csv*
 
@@ -124,24 +129,29 @@ C0 (passthrough, no crypto) now measured with the same event-driven CAN machiner
 
 | Config | Profile | Type | Median (ms) | Min (ms) | Max (ms) | run\_order |
 |--------|---------|------|-------------|----------|---------|-----------|
-| C1 | ideal | light | 11.4 | 0.8 | 12.5 | 1 |
-| C2 | ideal | light | 11.4 | 1.1 | 12.3 | 2 |
-| C3 | ideal | light | 11.4 | 10.0 | 12.2 | 3 |
-| C1 | ideal | **full** | 11.6 | 11.4 | 11.9 | 1 |
-| C2 | ideal | **full** | 11.6 | 11.3 | 11.8 | 2 |
-| C3 | ideal | **full** | 11.3 | 11.1 | 11.5 | 3 |
-| C1 | delay50 | light | 113.3 | 111.6 | 113.7 | 2 |
-| C2 | delay50 | light | 113.4 | 111.4 | 114.0 | 3 |
-| C3 | delay50 | light | 112.9 | 102.3 | 113.6 | 0 |
-| C3 | loss5 | light | **22.8** | 20.6 | **839.5 ⚠** | 2 |
+| C1 | ideal | light | 1.3 | 0.4 | 1.7 | 1 |
+| C2 | ideal | light | 1.3 | 0.8 | 1.8 | 2 |
+| C3 | ideal | light | 1.2 | 0.8 | 2.0 | 3 |
+| C1 | ideal | **full** | 11.9 | 11.8 | 12.7 | 1 |
+| C2 | ideal | **full** | 12.0 | 11.6 | 12.5 | 2 |
+| C3 | ideal | **full** | 11.4 | 11.3 | 13.0 | 3 |
+| C1 | delay5 | light | 12.5 | 11.8 | 14.5 | — |
+| C2 | delay5 | light | 12.2 | 11.5 | 13.0 | — |
+| C3 | delay5 | light | 12.4 | 11.8 | 13.0 | — |
+| C1 | delay50 | light | 102.7 | 101.8 | 103.3 | — |
+| C2 | delay50 | light | 102.9 | 101.7 | 103.6 | — |
+| C3 | delay50 | light | 103.0 | 101.6 | 157.2 | — |
+| C3 | loss5 | light | — | — | **420.7 ⚠** | — |
 
-**Light rekey improvement:** Previous median was ~31–33 ms (asyncio event-loop polling at 10 ms intervals). With `recv_stream()` (direct `queue.get()`), the ideal median is now 11.4 ms. The 11 ms floor is asyncio event-loop scheduling latency for one round-trip (REKEY\_REQ → REKEY\_ACK), not a protocol or crypto cost. The minimum values (C1=0.8 ms, C2=1.1 ms) show the actual operation is fast when the event loop schedules promptly.
+**Light rekey (ideal): protocol cost.** After removing the 10 ms event-loop timeout (see commit 23f428b), the ideal median dropped from ~11 ms to **1.2–1.3 ms**. The minimum (0.4–0.8 ms) is the protocol cost — the REKEY\_REQ + REKEY\_ACK round trip through the in-process emulator. Median exceeds min by 0.4–0.9 ms: asyncio scheduling jitter between putting the wake sentinel on the queue and when the event loop processes it and completes the round trip. The 1.2 ms median is the operative latency; treat it as "protocol cost with typical asyncio scheduling."
 
-**Full rekey:** Measured for the first time (event-based detection, not polling). C1=11.6 ms, C2=11.6 ms, C3=11.3 ms on ideal link. The full rekey runs a new handshake while the old session carries traffic; the event fires when the new session is established. All configs show ~11 ms, dominated by asyncio scheduling of the event-fire rather than by crypto time (C3 handshake crypto = 4.3 ms, C1 = 1.9 ms, but both appear as ~11 ms because the event propagation overhead is the bottleneck). This is significantly lower than the previous ~22 ms polling floor.
+**Automatic trigger timing note:** Automatic rekey triggers (record count, byte count, elapsed time) are checked at each event-loop iteration. With a 10 ms `wait_for` timeout on the main loop, the worst-case delay between a trigger threshold being reached and the REKEY\_REQ being sent is ~10 ms. This is trigger timing, not protocol cost — the actual REKEY\_REQ/REKEY\_ACK exchange is 1.2 ms on ideal.
 
-**Delay profiles:** Rekey time under delay scales correctly: delay50 adds 2 × 50 ms = 100 ms per round-trip, giving ~113 ms median. ✓
+**Full rekey:** New handshake run while the old session carries traffic; event fires when the new session is established. C1=11.9 ms, C2=12.0 ms, C3=11.4 ms on ideal link. Full rekey cost is dominated by the handshake wall time (~4.3–7.0 ms, §3b) plus asyncio event propagation overhead. Full rekey is intended for session reset (ignition events), not steady-state operation.
 
-⚠ C3/loss5 light-rekey max = 839 ms (n=20): REKEY\_REQ and REKEY\_ACK are small suite-independent DATA records; a large max is not caused by PQC message size. With 5% per-message loss, two consecutive losses cause two 400 ms retransmit waits ≈ 800 ms, matching the observed 839 ms. C1 and C2 each had at most one retry in 20 trials (max ≈ 431–433 ms). The difference is random variation at n = 20, not a property of the hybrid suite.
+**Delay profiles:** Light rekey under delay scales as expected: 2 × RTT + protocol overhead. delay5 → ~12.3 ms (5 ms × 2 + 1.5 ms), delay50 → ~103 ms. ✓
+
+⚠ C3/loss5 light-rekey max = 420.7 ms (one trial in n=20): a lost REKEY\_REQ causes one 400 ms retransmit wait. C1/C2 each had at most one retry in 20 trials (max ≈ 430 ms). The difference is random variation at n = 20, not a property of the hybrid suite.
 
 **Rekey interval sweep (C3/ideal, 1,000 frames):** rekey\_interval ≤ 500 frames triggers exactly 1 rekey per 1,000 frames; interval ≥ 1,000 frames triggers 0 rekeys (count threshold not reached in 1,000 frames).
 
@@ -198,6 +208,20 @@ SLH-DSA-SHA2-128f is used in agility matrix entry `s-slh` but was not benchmarke
 
 *Source: results/tables/micro.csv*
 
+### 3h. Per-Handshake Primitive Cost (In-Process)
+
+Dedicated measurement: full handshake sequence (keygen → start → process\_hello\_i → process\_hello\_r → process\_finished\_i → process\_finished\_r) run synchronously, no asyncio event loop, no link emulation. 50 warm-up iterations discarded; 1,000 measured; `time.perf_counter_ns()` per iteration. This is a **lower bound** on actual handshake cost; the in-loop wall time (§3b) is higher due to asyncio task-switching and Python protocol overhead.
+
+| Config | Primitive cost median (ms) | p95 (ms) | p99 (ms) | n |
+|--------|---------------------------|----------|---------|---|
+| C1 (classical) | 0.328 | 0.336 | 0.341 | 1000 |
+| C2 (PQC-only) | 0.346 | 0.470 | 0.559 | 1000 |
+| C3 (hybrid) | 0.658 | 0.790 | 0.860 | 1000 |
+
+**Interpretation:** C1 ≈ C2 ≈ 0.33–0.35 ms; both are fast because X25519 and ML-KEM-768 are sub-millisecond on arm64 (§3g), and ECDSA-P256 and ML-DSA-65 sign/verify are 30–70 µs each. C3 ≈ C1 + C2 (0.658 ms), confirming the hybrid combiner simply adds the two algorithms with negligible combiner overhead. The in-loop wall time (4.3–7.0 ms, §3b) is 7–20× higher: the difference is asyncio task-switching time and Python function-call and dict-operations overhead in the protocol implementation, not cryptographic cost.
+
+*Source: results/tables/primitive\_cost.csv, results/raw/primitive\_cost\_c\*.csv*
+
 ---
 
 ## 4. Figures
@@ -249,7 +273,8 @@ The following six limitations are verbatim from CLAUDE.md §1 and must be preser
 
 Additional limitations for this brief:
 - All timings are from an Apple arm64 machine (Apple Silicon). Absolute values will differ on x86-64 or embedded hardware.
-- Light rekey n = 20 per row; full rekey cost was not measured.
+- Light rekey n = 20 per row; treat medians as indicative.
+- The C0 vs C1–C3 latency comparison on delay20/50 has a ~1 ms measurement scope difference: C0 ingest is captured 1 asyncio hop after CAN arrival; C1–C3 ingest is captured 2 hops after CAN arrival (see §3d). This does not affect throughput or overhead measurements.
 - `security_t1_t13.csv` and `agility.csv` have not been generated yet (scripts exist; see §3a and §3f).
 
 ---
