@@ -2,6 +2,6 @@
 # payload_bytes=200  rate_hz=10.0  n_neighbours=10
 # Defaults are assumptions, not standards-derived values.
 suite,scheme,payload_bytes,sig_bytes,pk_bytes,overhead_bytes,total_per_beacon,overhead_pct,bytes_per_sec,rate_hz,n_neighbours,verify_median_ns,verify_load_ms_per_s,verify_timing_source
-classical,ECDSA-P256,200,64,0,64,264,32.0,2640.0,10.0,10,46062.0,4.61,measured
-pqc,ML-DSA-65,200,3309,0,3309,3509,1654.5,35090.0,10.0,10,38417.0,3.84,measured
-hybrid,ECDSA-P256 + ML-DSA-65 (dual),200,3373,0,3373,3573,1686.5,35730.0,10.0,10,86834.0,8.68,measured
+classical,ECDSA-P256,200,64,0,64,264,32.0,2640.0,10.0,10,45167.0,4.52,measured
+pqc,ML-DSA-65,200,3309,0,3309,3509,1654.5,35090.0,10.0,10,35750.0,3.58,measured
+hybrid,ECDSA-P256 + ML-DSA-65 (dual),200,3373,0,3373,3573,1686.5,35730.0,10.0,10,83750.0,8.38,measured

@@ -3,9 +3,9 @@
 # os,macOS-26.6.2-arm64-arm-64bit-Mach-O
 # cpu,arm
 # liboqs_version,unknown
-# git_commit,b1069f3798831aceb3137c5bcba3a3dc3253d8c8
+# git_commit,383469d75f84ed39c48cfc22ea3457a4a586ab31
 # src_dirty,false
-# timestamp,2026-11-15T15:05:13Z
+# timestamp,2026-11-16T08:18:22Z
 # no_slow,False
 
 entry_id,description,factor,experimental,config_only,handshake_ok,frag_count_i2r_match,frag_count_r2i_match,traffic_ok,t1_ok,t2_ok,t3_ok,t4_ok,t5_ok,t6_ok,t7_ok,t8_ok,t9_ok,t10_ok,t11_ok,t13_ok,overall_pass,run_time_ms

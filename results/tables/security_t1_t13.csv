@@ -2,8 +2,8 @@
 # os,macOS-26.6.2-arm64-arm-64bit-Mach-O
 # cpu,arm
 # liboqs_version,unknown
-# git_commit,b1069f3798831aceb3137c5bcba3a3dc3253d8c8
-# timestamp,2026-11-15T15:05:26Z
+# git_commit,383469d75f84ed39c48cfc22ea3457a4a586ab31
+# timestamp,2026-11-16T08:18:35Z
 # no_slow,False
 #
 # Legend: 'expected ✓' = test passed with expected outcome;,'expected ✗' = test failed or unexpected outcome;,'n/a' = test not applicable for this config (see §9);,'mechanism_absent' = mechanism not in installed liboqs.

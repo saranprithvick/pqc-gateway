@@ -4,9 +4,9 @@
 # cpu: arm
 # liboqs_version: 0.16.0
 # cryptography_version: 50.0.2
-# git_commit: b1069f3
+# git_commit: 383469d
 # seed: 0
-# timestamp: 2026-11-15T14:43:35Z
+# timestamp: 2026-11-16T07:54:58Z
 config,baseline_bytes,frag_header_bytes,prefix_bytes,record_header_bytes,record_tag_bytes,total_overhead_bytes,dlc
 c0,5,8,0,0,0,13,8
 c1,5,8,1,16,16,46,8

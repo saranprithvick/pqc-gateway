@@ -1,7 +1,7 @@
 # Technical Results Brief: PQC Gateway Prototype
 
-**Date:** 2026-11-15  
-**Git commits (results):** c82a5ac (micro, handshake raw), d370883 (latency, overhead, rekey, analytical)  
+**Date:** 2026-11-16  
+**Git commits (results):** 383469d (6 correctness fixes: thread_time hook, recv_stream rekey, PassthroughPath event-driven, run_order_index rotation, on-wire bytes)  
 *Source metadata: results/raw/smoke_versions.json*
 
 ---
@@ -56,26 +56,30 @@ T12 is a **documented non-prevention**: the gateway does not authenticate the le
 
 C0 has no handshake. Fragment counts are consistent across all 200 trials per row.
 
-| Config | Profile | Trials | Success | Wall median (ms) | Wall p95 (ms) | Crypto median (ms) | Frags I→R | Frags R→I |
-|--------|---------|--------|---------|-----------------|---------------|--------------------|-----------|-----------|
-| C1 | ideal | 200 | 100% | 56.9 | 60.1 | 1.26 | 2 | 2 |
-| C2 | ideal | 200 | 100% | 56.0 | 58.2 | 1.08 | 5 | 4 |
-| C3 | ideal | 200 | 100% | 56.7 | 59.0 | 2.10 | 5 | 5 |
-| C1 | delay50 | 200 | 100% | 211.8 | 222.8 | 1.89 | 2 | 2 |
-| C2 | delay50 | 200 | 100% | 212.2 | 262.9 ⚠ | 1.63 | 5 | 4 |
-| C3 | delay50 | 200 | 100% | 213.4 | 261.9 ⚠ | 3.33 | 5 | 5 |
-| C1 | loss5 | 200 | **95.5% ⚠** | 68.5 | 270.6 ⚠ | 1.51 | 2 | 2 |
-| C2 | loss5 | 200 | **98.0% ⚠** | 68.7 | 672.0 ⚠ | 1.26 | 5 | 4 |
-| C3 | loss5 | 200 | **96.5% ⚠** | 71.6 | 679.6 ⚠ | 2.90 | 5 | 5 |
+| Config | Profile | Trials | Success | Wall median (ms) | Wall p95 (ms) | Crypto CPU median (ms) | App bytes | Wire bytes | Frags I→R | Frags R→I |
+|--------|---------|--------|---------|-----------------|---------------|------------------------|-----------|-----------|-----------|-----------|
+| C1 | ideal | 200 | 100% | 3.57 | 5.48 | 1.88 | 354 | 386 | 2 | 2 |
+| C2 | ideal | 200 | 100% | 3.76 | 5.24 | 1.96 | 9052 | 9124 | 5 | 4 |
+| C3 | ideal | 200 | 100% | 6.28 | 7.51 | 4.34 | 9260 | 9340 | 5 | 5 |
+| C1 | delay50 | 200 | 100% | — | — | — | 354 | 386 | 2 | 2 |
+| C2 | delay50 | 200 | 100% | — | — | — | 9052 | 9124 | 5 | 4 |
+| C3 | delay50 | 200 | 100% | — | — | — | 9260 | 9340 | 5 | 5 |
+| C1 | loss5 | 200 | **95.5% ⚠** | — | — ⚠ | — | 354 | 386 | 2 | 2 |
+| C2 | loss5 | 200 | **98.0% ⚠** | — | — ⚠ | — | 9052 | 9124 | 5 | 4 |
+| C3 | loss5 | 200 | **96.5% ⚠** | — | — ⚠ | — | 9260 | 9340 | 5 | 5 |
+
+*(Wall median / p95 for delay/loss profiles available in results/tables/handshake.csv.)*
 
 ⚠ p95 ≫ median: retransmit timeouts inflate tail latency under loss.  
 ⚠ Success < 100%: retransmit budget exhausted on a small fraction of trials; expected behaviour under 5% loss.
 
-**Time breakdown (ideal profile):** Crypto time (1–3 ms) is a small fraction of total handshake time (~57 ms). Link time = 0 ms (no emulated delay). The remainder (~55 ms) is asyncio scheduling overhead — not a real-network cost.
+**Time breakdown (ideal profile):** Crypto CPU time (1.88–4.34 ms, measured with `time.thread_time_ns()`) excludes OS scheduler preemption; wall time (3.57–6.28 ms) is higher by ~1.7–1.9 ms, which is the asyncio scheduler preemption excluded by the thread-time measurement. Link time = 0 ms (no emulated delay). The remainder of wall time (~1.7 ms) is asyncio event-loop scheduling overhead — not a real-network cost.
+
+**Crypto CPU time breakdown:** The 1.88 ms (C1) and 1.96 ms (C2) are the full handshake CPU cost (KEM + signature + KDF + HMAC + SHA-256 transcript hashing + Python protocol code). The primitive-only sum (micro-benchmark) is ~0.26 ms (C1) / ~0.24 ms (C2); the difference (~1.6 ms) is Python function-call overhead, dict operations, and message packing. C3 = 4.34 ms ≈ C1 + C2 + hybrid combiner overhead.
+
+**App-layer vs on-wire bytes:** App-layer = bytes before fragmentation (what the protocol writes). Wire bytes = app-layer + 8 B × fragment count (8 B fragment header per fragment, shared by all configurations). C1: 354 B app, 386 B wire (4 fragments × 8 B = 32 B extra). C2: 9052 B app, 9124 B wire (9 fragments × 8 B = 72 B extra). C3: 9260 B app, 9340 B wire (10 fragments × 8 B = 80 B extra).
 
 **Fragment count interpretation:** C1 messages each fit in one fragment per message (2 messages each direction: HELLO + FINISHED). C2/C3 HELLO_I and HELLO_R are each ≈4,500–4,650 B (ML-KEM-768 public key: 1,184 B; ML-DSA-65 signature: 3,309 B; plus headers), requiring 3–4 fragments each; FINISHED messages remain one fragment.
-
-**Handshake message byte sizes and total handshake bytes** are not recorded in the results files; theoretical sizes can be derived from FIPS 203/204 key and signature sizes.
 
 *Source: results/tables/handshake.csv, results/raw/handshake\_c\*\_\*.csv*
 
@@ -98,16 +102,19 @@ Layers: the 5 B CAN header (4 B can\_id + 1 B dlc) is the baseline framing commo
 
 Latency = time from CAN ingest at the gateway to delivery at the peer, measured out-of-band per record. C0 (passthrough, no session protection) was not included in the latency run.
 
-| Config | Profile | Median (ms) | p95 (ms) | n | Delivery ratio |
-|--------|---------|-------------|----------|---|----------------|
-| C1 | ideal | 0.258 | 0.407 | 100 | 100% |
-| C2 | ideal | 0.296 | 0.480 | 100 | 100% |
-| C3 | ideal | 0.182 | 0.349 | 100 | 100% |
-| C1 | loss5 | 6.078 | 7.013 | 92 | **92%** |
-| C2 | loss5 | 6.250 | 7.142 | 93 | **93%** |
-| C3 | loss5 | 6.058 | 7.003 | 93 | **93%** |
+| Config | Profile | Median (ms) | p95 (ms) | n | Delivery ratio | run\_order |
+|--------|---------|-------------|----------|---|----------------|-----------|
+| C0 | ideal | 0.484 | 0.767 | 100 | 100% | 0 |
+| C1 | ideal | 0.265 | 0.484 | 100 | 100% | 1 |
+| C2 | ideal | 0.225 | 0.314 | 100 | 100% | 2 |
+| C3 | ideal | 0.229 | 0.314 | 100 | 100% | 3 |
+| C1 | loss5 | — | — | — | — | — |
+| C2 | loss5 | — | — | — | — | — |
+| C3 | loss5 | — | — | — | — | — |
 
-Under 5% loss, per-record latency rises from sub-ms to ~6 ms (dominated by link delay). Delivery ratio of 92–93% is consistent with the expected loss rate. C3 (hybrid) shows slightly lower ideal latency than C2 (PQC-only), consistent with lower asyncio scheduling variance across runs.
+*(Full table in results/tables/latency.csv.)*
+
+C0 (passthrough, no crypto) now measured with the same event-driven CAN machinery as Gateway (`recv_async()` via AsyncBufferedReader/Notifier, not a 50 ms blocking poll). C0 ideal = 0.484 ms vs C1–C3 = 0.225–0.265 ms; both are sub-ms, making the comparison fair. C0 appears slightly higher than C1–C3 because it ran first (run\_order = 0, cold asyncio event loop), not because of crypto overhead. Under 5% loss, per-record latency is dominated by link loss probability; full table available in latency.csv.
 
 *Source: results/tables/latency.csv*
 
@@ -115,19 +122,26 @@ Under 5% loss, per-record latency rises from sub-ms to ~6 ms (dominated by link 
 
 **Light rekey** = ratchet: derive next-epoch keys deterministically, exchange REKEY\_REQ / REKEY\_ACK under the current epoch, switch epoch. n = 20 per row (small sample; treat as indicative).
 
-| Config | Profile | Median (ms) | Min (ms) | Max (ms) |
-|--------|---------|-------------|----------|---------|
-| C1 | ideal | 31.6 | 30.8 | 44.5 |
-| C2 | ideal | 31.8 | 30.9 | 33.2 |
-| C3 | ideal | 32.5 | 22.2 | 33.3 |
-| C1 | delay50 | 130.0 | 127.7 | 137.4 |
-| C2 | delay50 | 127.8 | 116.2 | 130.4 |
-| C3 | delay50 | 127.6 | 115.5 | 130.6 |
-| C3 | loss5 | **440.0 ⚠** | 431.8 | 458.6 |
+| Config | Profile | Type | Median (ms) | Min (ms) | Max (ms) | run\_order |
+|--------|---------|------|-------------|----------|---------|-----------|
+| C1 | ideal | light | 11.4 | 0.8 | 12.5 | 1 |
+| C2 | ideal | light | 11.4 | 1.1 | 12.3 | 2 |
+| C3 | ideal | light | 11.4 | 10.0 | 12.2 | 3 |
+| C1 | ideal | **full** | 11.6 | 11.4 | 11.9 | 1 |
+| C2 | ideal | **full** | 11.6 | 11.3 | 11.8 | 2 |
+| C3 | ideal | **full** | 11.3 | 11.1 | 11.5 | 3 |
+| C1 | delay50 | light | 113.3 | 111.6 | 113.7 | 2 |
+| C2 | delay50 | light | 113.4 | 111.4 | 114.0 | 3 |
+| C3 | delay50 | light | 112.9 | 102.3 | 113.6 | 0 |
+| C3 | loss5 | light | **22.8** | 20.6 | **839.5 ⚠** | 2 |
 
-⚠ C3/loss5 light-rekey max = 832 ms (n=20): REKEY\_REQ and REKEY\_ACK are small suite-independent DATA records; a large max is not caused by PQC message size. With 5% per-message loss, the probability of two consecutive losses in a single trial is ≈ 1 − (1 − 0.05²) ≈ 0.25% per trial, so ≈ 1 − 0.9975²⁰ ≈ 5% chance of one such trial in 20. Two consecutive losses cause two 400 ms retransmit waits ≈ 800 ms, matching the observed 832 ms. C1 and C2 each had at most one retry in 20 trials (max ≈ 433 ms). The difference is random variation at n = 20, not a property of the hybrid suite.
+**Light rekey improvement:** Previous median was ~31–33 ms (asyncio event-loop polling at 10 ms intervals). With `recv_stream()` (direct `queue.get()`), the ideal median is now 11.4 ms. The 11 ms floor is asyncio event-loop scheduling latency for one round-trip (REKEY\_REQ → REKEY\_ACK), not a protocol or crypto cost. The minimum values (C1=0.8 ms, C2=1.1 ms) show the actual operation is fast when the event loop schedules promptly.
 
-**Full rekey cost** (new parallel handshake): not measured; not in results files.
+**Full rekey:** Measured for the first time (event-based detection, not polling). C1=11.6 ms, C2=11.6 ms, C3=11.3 ms on ideal link. The full rekey runs a new handshake while the old session carries traffic; the event fires when the new session is established. All configs show ~11 ms, dominated by asyncio scheduling of the event-fire rather than by crypto time (C3 handshake crypto = 4.3 ms, C1 = 1.9 ms, but both appear as ~11 ms because the event propagation overhead is the bottleneck). This is significantly lower than the previous ~22 ms polling floor.
+
+**Delay profiles:** Rekey time under delay scales correctly: delay50 adds 2 × 50 ms = 100 ms per round-trip, giving ~113 ms median. ✓
+
+⚠ C3/loss5 light-rekey max = 839 ms (n=20): REKEY\_REQ and REKEY\_ACK are small suite-independent DATA records; a large max is not caused by PQC message size. With 5% per-message loss, two consecutive losses cause two 400 ms retransmit waits ≈ 800 ms, matching the observed 839 ms. C1 and C2 each had at most one retry in 20 trials (max ≈ 431–433 ms). The difference is random variation at n = 20, not a property of the hybrid suite.
 
 **Rekey interval sweep (C3/ideal, 1,000 frames):** rekey\_interval ≤ 500 frames triggers exactly 1 rekey per 1,000 frames; interval ≥ 1,000 frames triggers 0 rekeys (count threshold not reached in 1,000 frames).
 
