@@ -138,6 +138,8 @@ class Gateway:
 
         # Created in run() (needs event loop)
         self._hs_queue: Optional[asyncio.Queue] = None
+        # Shared with request_*_rekey_with_event() so they can wake the main loop immediately.
+        self._evt_q: Optional[asyncio.Queue] = None
 
         # Epoch-change event for bench light-rekey measurement (one-shot; bench harness only)
         self._epoch_changed_event: Optional[asyncio.Event] = None
@@ -211,6 +213,10 @@ class Gateway:
         event = asyncio.Event()
         self._full_rekey_event = event
         self._manual_full_rekey = True
+        # Wake the run() main loop immediately so it processes step 1 without
+        # waiting up to 10 ms for the current wait_for timeout to expire.
+        if self._evt_q is not None:
+            self._evt_q.put_nowait(("wake", None))
         return event
 
     def request_light_rekey_with_event(self) -> asyncio.Event:
@@ -223,6 +229,9 @@ class Gateway:
         event = asyncio.Event()
         self._epoch_changed_event = event
         self._manual_light_rekey = True
+        # Wake the run() main loop immediately (see request_full_rekey_with_event).
+        if self._evt_q is not None:
+            self._evt_q.put_nowait(("wake", None))
         return event
 
     def _set_epoch_for_testing(self, epoch: int) -> None:
@@ -569,6 +578,7 @@ class Gateway:
         # Pre-seed with buffered pre-session frames so they go through the same
         # main loop path (trigger checks, REKEY_ACK interleaving) as live frames.
         _evt_q: asyncio.Queue = asyncio.Queue()
+        self._evt_q = _evt_q  # expose for request_*_rekey_with_event() wake sentinels
 
         for frame in list(self._pre_session_buf):
             _evt_q.put_nowait(("can", frame))
@@ -672,6 +682,9 @@ class Gateway:
                 except asyncio.TimeoutError:
                     continue
 
+                if kind == "wake":
+                    continue  # wake sentinel: re-enter loop to process step 1 flags
+
                 if kind == "can":
                     await self.send_frame(value)
                     frames_sent += 1
@@ -711,6 +724,7 @@ class Gateway:
                         else:
                             self._malformed_drops += 1
         finally:
+            self._evt_q = None  # prevent stale wake sentinels after run() exits
             _can_task.cancel()
             _link_task.cancel()
             await asyncio.gather(_can_task, _link_task, return_exceptions=True)

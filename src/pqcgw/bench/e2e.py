@@ -354,15 +354,13 @@ def run_handshake_trials(
     )
 
     if rows:
-        # Summary stats
+        # Summary stats — wall time only; crypto cost is reported separately
+        # via run_primitive_cost() (in-process, no asyncio concurrency noise).
         wall_samples = [r["wall_ns"] for r in rows]
-        crypto_samples = [r["crypto_ns"] for r in rows]
         try:
             st_wall = compute_stats(wall_samples)
-            st_crypto = compute_stats(crypto_samples)
             print(
-                f"      wall median={st_wall.median_ns/1e6:.1f}ms p95={st_wall.p95_ns/1e6:.1f}ms  "
-                f"crypto median={st_crypto.median_ns/1e6:.1f}ms"
+                f"      wall median={st_wall.median_ns/1e6:.1f}ms p95={st_wall.p95_ns/1e6:.1f}ms"
             )
         except ValueError:
             pass
@@ -380,7 +378,6 @@ def run_handshake_trials(
             "n_trials": n_trials, "n_success": len(rows), "n_fail": failures,
             "success_rate": success_rate,
             **(compute_stats(wall_samples).as_dict("wall_") if len(rows) >= 50 else {}),
-            **(compute_stats(crypto_samples).as_dict("crypto_") if len(rows) >= 50 else {}),
             "bytes_hello_i": _med_int("bytes_hello_i"),
             "bytes_hello_r": _med_int("bytes_hello_r"),
             "bytes_finished_i": _med_int("bytes_finished_i"),
@@ -479,34 +476,47 @@ async def _run_passthrough_latency(
     chan: str,
     n_frames: int,
 ) -> tuple[list[int], int]:
-    """Measure C0 PassthroughPath latency and return (latency_ns_list, delivered)."""
-    from pqcgw.nodes.passthrough import PassthroughPath
+    """Measure C0 PassthroughPath latency and return (latency_ns_list, delivered).
 
+    Ingest timestamp is captured at the GATEWAY (after can_gw.recv_async()), not
+    at the sender, so the measurement is comparable to C1–C3 (which capture ingest
+    at gateway.send_frame() after CAN reception and event-queue dequeue).
+    """
     emulator = LinkEmulator(net_cfg)
     gw_link = emulator.gateway_half
     peer_link = emulator.peer_half
-    passthrough = PassthroughPath()
-    sink: asyncio.Queue[CANFrame] = asyncio.Queue()
+    sink: asyncio.Queue[tuple[int, int]] = asyncio.Queue()
 
-    t_ingest: dict[int, int] = {}  # seq → ingest_ns (out-of-band, not on wire)
+    t_ingest: dict[int, int] = {}  # seq → ingest_ns captured at gateway CAN receive
 
     with CanAdapter(chan) as can_gw, CanAdapter(chan) as can_sender:
         async def _send_frames() -> None:
             for seq in range(n_frames):
                 frame = CANFrame(can_id=0x100, dlc=8, data=seq.to_bytes(8, "big"))
-                t_ingest[seq] = time.perf_counter_ns()
                 can_sender.send(frame)
                 await asyncio.sleep(1.0 / _DATA_RATE_HZ)
 
         async def _gw_side() -> None:
-            await passthrough.run_gateway_side(can_gw, gw_link, n_frames)
+            # Inline the passthrough gateway path to capture ingest at gateway
+            # (consistent with C1–C3 LatencyTracker which records after CAN receive).
+            sent = 0
+            while sent < n_frames:
+                frame = await can_gw.recv_async()
+                t_ingest_ns = time.perf_counter_ns()  # CAN-ingest timestamp (gateway side)
+                try:
+                    seq = int.from_bytes(frame.data[:8], "big")
+                except Exception:
+                    seq = -1
+                if seq >= 0:
+                    t_ingest[seq] = t_ingest_ns
+                encoded = MessageAdapter.encode(frame)
+                await gw_link.send(encoded)
+                sent += 1
 
         async def _peer_side() -> None:
             received = 0
             while received < n_frames:
-                wire = await peer_link.recv(timeout=5.0)
-                if wire is None:
-                    continue
+                wire = await peer_link.recv_stream()
                 try:
                     frame = MessageAdapter.decode(wire)
                 except ValueError:
@@ -1036,6 +1046,86 @@ def run_rekey_cost(config: str, profile: str, env: dict, run_order_index: int = 
 
 
 # ---------------------------------------------------------------------------
+# Sub-run P: Dedicated in-process primitive cost (per handshake)
+# ---------------------------------------------------------------------------
+
+_PRIMITIVE_COST_WARMUP = 50
+_PRIMITIVE_COST_REPS = 1000
+
+
+def run_primitive_cost(configs: list[str], env: dict) -> None:
+    """Measure per-handshake primitive cost for C1–C3 (in-process, no asyncio/link).
+
+    Runs HandshakeInitiator.start() → HandshakeResponder.process_hello_i() →
+    HandshakeInitiator.process_hello_r() → HandshakeInitiator send FINISHED_I →
+    HandshakeResponder.process_finished_i() → HandshakeInitiator.process_finished_r()
+    in a tight synchronous loop (no event loop, no link emulation).
+
+    This is the theoretical primitive cost: keygen + KEM + 2×sign + 2×verify +
+    KDF + HMAC per handshake, without asyncio task-switching or cache-eviction
+    pressure from concurrent tasks.  It is a lower bound; the concurrent in-loop
+    measurement is higher due to cache effects between gateway and peer primitives.
+
+    Reports median/p95/p99 for ≥1000 reps after ≥50 warm-up reps discarded.
+    Writes results/tables/primitive_cost.csv and results/raw/primitive_cost_<config>.csv.
+    """
+    from pqcgw.protocol.handshake import HandshakeInitiator, HandshakeResponder
+
+    print("\n--- Primitive cost (in-process, no asyncio) ---")
+
+    summary_rows: list[dict] = []
+
+    for config in configs:
+        if config == "c0":
+            continue
+        suite_name = _CONFIGS[config]
+        suite = load_suite(_SUITE_DIR / f"{suite_name}.toml")
+        gw_id, peer_id = _make_identities(suite)
+
+        def _one_handshake_sync() -> None:
+            gw_hs = HandshakeInitiator(suite, gw_id)
+            peer_hs = HandshakeResponder(suite, peer_id)
+            hello_i = gw_hs.start()
+            hello_r = peer_hs.process_hello_i(hello_i)
+            finished_i = gw_hs.process_hello_r(hello_r)
+            finished_r, _keys = peer_hs.process_finished_i(finished_i)
+            gw_hs.process_finished_r(finished_r)
+
+        # Warm-up: discard timing
+        gc.collect()
+        for _ in range(_PRIMITIVE_COST_WARMUP):
+            _one_handshake_sync()
+
+        # Measured reps
+        gc.collect()
+        samples: list[int] = []
+        for _ in range(_PRIMITIVE_COST_REPS):
+            t0 = time.perf_counter_ns()
+            _one_handshake_sync()
+            samples.append(time.perf_counter_ns() - t0)
+
+        st = compute_stats(samples)
+        print(
+            f"  {config}: primitive cost (n={st.n}) "
+            f"median={st.median_ns/1e6:.3f}ms "
+            f"p95={st.p95_ns/1e6:.3f}ms "
+            f"p99={st.p99_ns/1e6:.3f}ms"
+        )
+
+        raw_rows = [{"config": config, "suite": suite_name, "trial": i, "cost_ns": t}
+                    for i, t in enumerate(samples)]
+        write_csv(_RAW_DIR / f"primitive_cost_{config}.csv", raw_rows, env)
+
+        summary_rows.append({
+            "config": config, "suite": suite_name, **st.as_dict("cost_")
+        })
+
+    if summary_rows:
+        write_csv(_TABLES_DIR / "primitive_cost.csv", summary_rows, env)
+        print(f"  → results/tables/primitive_cost.csv ({len(summary_rows)} rows)")
+
+
+# ---------------------------------------------------------------------------
 # Overhead layer decomposition
 # ---------------------------------------------------------------------------
 
@@ -1085,12 +1175,12 @@ def run(
     sub: set of sub-run letters to run, e.g. {"B","C","D"}. None = all.
     """
     env = collect_env()
-    _subs = sub if sub is not None else {"A", "B", "C", "D"}
+    _subs = sub if sub is not None else {"A", "B", "C", "D", "P"}
 
     # Unlink all summary tables so each run starts from a clean slate.
     # Raw files are kept (timestamped in filenames) so previous runs are not lost.
     for _fname in ["handshake.csv", "latency.csv", "throughput.csv",
-                   "rekey_cost.csv", "rekey_sweep.csv"]:
+                   "rekey_cost.csv", "rekey_sweep.csv", "primitive_cost.csv"]:
         (_TABLES_DIR / _fname).unlink(missing_ok=True)
 
     # Write overhead decomposition table (always overwrite — it's deterministic)
@@ -1098,6 +1188,11 @@ def run(
     overhead_path.unlink(missing_ok=True)
     overhead_rows = [measure_overhead(c) for c in configs]
     write_csv(overhead_path, overhead_rows, env)
+
+    # Dedicated in-process primitive cost (sub-run P): once per bench run, before
+    # the per-profile loop, so asyncio scheduler state doesn't affect it.
+    if "P" in _subs:
+        run_primitive_cost(configs, env)
 
     # Rotate config order per profile to control for run-order effects (CPU cache,
     # asyncio scheduler warm-up, etc.).  Profile p_idx starts with configs[p_idx % n].
@@ -1126,8 +1221,8 @@ if __name__ == "__main__":
                         help="Network profile(s)")
     parser.add_argument("--skip-hs", action="store_true",
                         help="Skip sub-run A (handshake) — use when already complete")
-    parser.add_argument("--sub", nargs="*", choices=["A", "B", "C", "D"],
-                        help="Run only these sub-runs (default: all)")
+    parser.add_argument("--sub", nargs="*", choices=["A", "B", "C", "D", "P"],
+                        help="Run only these sub-runs (default: all; P=primitive cost)")
     args = parser.parse_args()
     run(
         args.config,
