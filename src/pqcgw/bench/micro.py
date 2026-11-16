@@ -100,6 +100,11 @@ def bench_sig(suite_name: str, env: dict) -> None:
     suite = load_suite(_suite_path(suite_name))
     sig = suite.signature
     rows: list[dict] = []
+    # Fixed 64 B message used for all algorithms.  Most PQC signature schemes
+    # (ML-DSA, SLH-DSA, Falcon) hash the message internally, so the 64 B
+    # message size has negligible effect on sign/verify time — the benchmark
+    # measures algorithm overhead, not message-hashing overhead.
+    # ECDSA-P256 and hybrid combiner pre-hash with SHA-256; same applies.
     msg = os.urandom(64)  # fixed message for all sign/verify iterations
 
     # keygen

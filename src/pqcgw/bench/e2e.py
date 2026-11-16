@@ -266,6 +266,12 @@ async def _one_handshake(
             msg_bytes[name] = nbytes
     total_hs_bytes = sum(n for _, n in gw_tracker.sent + peer_tracker.sent)
 
+    # On-wire bytes = app-layer bytes + 8 B fragment header per fragment.
+    # ByteTracker records bytes BEFORE fragmentation; the 8 B header is added
+    # by the emulator per fragment.  Report both for the benchmark table.
+    frags_total = emulator.fragments_sent_i2r + emulator.fragments_sent_r2i
+    total_hs_bytes_onwire = total_hs_bytes + 8 * frags_total
+
     return {
         "success": True,
         "wall_ns": wall_ns,
@@ -281,6 +287,7 @@ async def _one_handshake(
         "bytes_finished_i": msg_bytes.get("FINISHED_I", 0),
         "bytes_finished_r": msg_bytes.get("FINISHED_R", 0),
         "bytes_total_hs": total_hs_bytes,
+        "bytes_total_hs_onwire": total_hs_bytes_onwire,
         **{f"amortised_overhead_{n}": total_hs_bytes / n for n in _AMORTISE_SESSIONS},
     }
 
@@ -290,6 +297,7 @@ def run_handshake_trials(
     profile: str,
     env: dict,
     n_trials: int = _HANDSHAKE_TRIALS,
+    run_order_index: int = 0,
 ) -> None:
     """Sub-run A: ≥ 200 handshake trials, record timing breakdown."""
     suite_name = _CONFIGS[config]
@@ -365,8 +373,10 @@ def run_handshake_trials(
             return int(sorted(vals)[len(vals) // 2]) if vals else 0
 
         total_hs_med = _med_int("bytes_total_hs")
+        total_hs_onwire_med = _med_int("bytes_total_hs_onwire")
         summary = [{
             "config": config, "profile": profile,
+            "run_order_index": run_order_index,
             "n_trials": n_trials, "n_success": len(rows), "n_fail": failures,
             "success_rate": success_rate,
             **(compute_stats(wall_samples).as_dict("wall_") if len(rows) >= 50 else {}),
@@ -376,6 +386,7 @@ def run_handshake_trials(
             "bytes_finished_i": _med_int("bytes_finished_i"),
             "bytes_finished_r": _med_int("bytes_finished_r"),
             "bytes_total_hs": total_hs_med,
+            "bytes_total_hs_onwire": total_hs_onwire_med,
             **{f"amortised_overhead_{n}": round(total_hs_med / n, 2)
                for n in _AMORTISE_SESSIONS},
         }]
@@ -524,7 +535,7 @@ async def _run_passthrough_latency(
     return latencies, len(latencies)
 
 
-def run_latency(config: str, profile: str, env: dict) -> None:
+def run_latency(config: str, profile: str, env: dict, run_order_index: int = 0) -> None:
     """Sub-run B: latency at scenario rate."""
     suite_name = _CONFIGS[config]
     chan = _unique_channel()
@@ -553,6 +564,7 @@ def run_latency(config: str, profile: str, env: dict) -> None:
                 f"median={st.median_ns/1e6:.2f}ms p95={st.p95_ns/1e6:.2f}ms"
             )
             summary = [{"config": "c0", "profile": profile,
+                        "run_order_index": run_order_index,
                         "delivery_ratio": delivery_ratio, **st.as_dict("latency_")}]
             write_csv(_TABLES_DIR / "latency.csv", summary, env)
         except ValueError:
@@ -590,6 +602,7 @@ def run_latency(config: str, profile: str, env: dict) -> None:
             f"median={st.median_ns/1e6:.2f}ms p95={st.p95_ns/1e6:.2f}ms p99={st.p99_ns/1e6:.2f}ms"
         )
         summary = [{"config": config, "profile": profile,
+                    "run_order_index": run_order_index,
                     "delivery_ratio": delivery_ratio, **st.as_dict("latency_")}]
         write_csv(_TABLES_DIR / "latency.csv", summary, env)
     except ValueError:
@@ -675,7 +688,7 @@ async def _run_throughput(
     }
 
 
-def run_throughput_memory(config: str, profile: str, env: dict) -> None:
+def run_throughput_memory(config: str, profile: str, env: dict, run_order_index: int = 0) -> None:
     """Sub-run C: throughput saturation (timed) + peak memory (separate untimed run).
 
     Memory and timing are intentionally separated per §8: tracemalloc must not
@@ -716,6 +729,7 @@ def run_throughput_memory(config: str, profile: str, env: dict) -> None:
 
     row = {
         "config": config, "profile": profile,
+        "run_order_index": run_order_index,
         **result,
         "peak_memory_bytes": peak,
     }
@@ -905,9 +919,11 @@ async def _measure_full_rekey(
                                    data=bytes([i % 256] * 8)))
         await asyncio.sleep(0.1)
 
-        # Trigger full rekey and start timing.
+        # Trigger full rekey and start timing using an event (no polling).
+        # request_full_rekey_with_event() sets the flag AND returns an Event
+        # that the run() loop fires when the new session is established.
         t0 = time.perf_counter_ns()
-        gw.request_full_rekey()
+        full_rekey_event = gw.request_full_rekey_with_event()
         injected_during_rekey = 0
 
         # Inject live frames at 100 Hz while the full rekey is in flight.
@@ -921,16 +937,13 @@ async def _measure_full_rekey(
 
         inject_task = asyncio.create_task(_inject_live())
 
-        # Poll until the session ID changes (new session up) or timeout.
+        # Wait for new session event (event-driven; no 10ms polling overhead).
         t_new_session = 0
-        deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline:
-            await asyncio.sleep(0.01)
-            if (gw._sm is not None
-                    and gw._sm._session_id != old_session_id
-                    and not gw._full_rekey_pending):
-                t_new_session = time.perf_counter_ns()
-                break
+        try:
+            await asyncio.wait_for(full_rekey_event.wait(), timeout=15.0)
+            t_new_session = time.perf_counter_ns()
+        except asyncio.TimeoutError:
+            pass
 
         await asyncio.wait_for(inject_task, timeout=5.0)
         t1 = time.perf_counter_ns()
@@ -953,7 +966,7 @@ async def _measure_full_rekey(
     }
 
 
-def run_rekey_cost(config: str, profile: str, env: dict) -> None:
+def run_rekey_cost(config: str, profile: str, env: dict, run_order_index: int = 0) -> None:
     """Sub-run D: light-rekey cost ×20 + full-rekey cost ×10 + interval sweep (C3/ideal only)."""
     if config == "c0":
         print(f"  [D] {config}/{profile}: C0 has no rekey — skipping")
@@ -984,7 +997,8 @@ def run_rekey_cost(config: str, profile: str, env: dict) -> None:
                 for i, t in enumerate(light_times)]
         write_csv(_RAW_DIR / f"rekey_light_{config}_{profile}.csv", rows, env)
         write_csv(_TABLES_DIR / "rekey_cost.csv",
-                  [{"config": config, "profile": profile, "type": "light", **st.as_dict("time_")}], env)
+                  [{"config": config, "profile": profile, "run_order_index": run_order_index,
+                    "type": "light", **st.as_dict("time_")}], env)
 
     # Full rekey cost × 10 (ideal only — full rekey under loss is out of scope for M7)
     if profile == "ideal":
@@ -1006,13 +1020,14 @@ def run_rekey_cost(config: str, profile: str, env: dict) -> None:
             st_f = compute_small_n_stats(full_times)
             print(
                 f"  [D] {config}/{profile}: full rekey (n={st_f.n}) "
-                f"median={st_f.median_ns/1e6:.0f}ms min={st_f.min_ns/1e6:.0f}ms "
-                f"max={st_f.max_ns/1e6:.0f}ms"
+                f"median={st_f.median_ns/1e6:.2f}ms min={st_f.min_ns/1e6:.2f}ms "
+                f"max={st_f.max_ns/1e6:.2f}ms"
             )
             write_csv(_RAW_DIR / f"rekey_full_{config}_{profile}.csv", full_rows, env)
             write_csv(_TABLES_DIR / "rekey_cost.csv",
-                      [{"config": config, "profile": profile, "type": "full",
-                        **st_f.as_dict("time_")}], env)
+                      [{"config": config, "profile": profile,
+                        "run_order_index": run_order_index,
+                        "type": "full", **st_f.as_dict("time_")}], env)
 
     # Interval sweep: only for C3 on ideal profile (§plan sub-run D)
     if config == "c3" and profile == "ideal":
@@ -1084,17 +1099,23 @@ def run(
     overhead_rows = [measure_overhead(c) for c in configs]
     write_csv(overhead_path, overhead_rows, env)
 
-    for config in configs:
-        for profile in profiles:
-            print(f"\n--- {config} / {profile} ---")
+    # Rotate config order per profile to control for run-order effects (CPU cache,
+    # asyncio scheduler warm-up, etc.).  Profile p_idx starts with configs[p_idx % n].
+    # run_order_index records the position within that rotation so order effects
+    # can be detected in the results.
+    n_cfgs = len(configs)
+    for p_idx, profile in enumerate(profiles):
+        rotated = configs[p_idx % n_cfgs:] + configs[:p_idx % n_cfgs]
+        for r_idx, config in enumerate(rotated):
+            print(f"\n--- {config} / {profile} [run_order={r_idx}] ---")
             if "A" in _subs and not skip_hs:
-                run_handshake_trials(config, profile, env)
+                run_handshake_trials(config, profile, env, run_order_index=r_idx)
             if "B" in _subs:
-                run_latency(config, profile, env)
+                run_latency(config, profile, env, run_order_index=r_idx)
             if "C" in _subs:
-                run_throughput_memory(config, profile, env)
+                run_throughput_memory(config, profile, env, run_order_index=r_idx)
             if "D" in _subs:
-                run_rekey_cost(config, profile, env)
+                run_rekey_cost(config, profile, env, run_order_index=r_idx)
 
 
 if __name__ == "__main__":

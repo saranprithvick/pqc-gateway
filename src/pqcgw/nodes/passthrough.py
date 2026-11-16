@@ -8,7 +8,7 @@ This matches the minimal overhead a real unsecured link would carry.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Optional  # noqa: F401 — used by run_peer_side annotation
 
 from pqcgw.legacy.can_adapter import CanAdapter
 from pqcgw.legacy.can_model import CANFrame
@@ -25,15 +25,18 @@ class PassthroughPath:
         link: Link,
         n_frames: int,
     ) -> None:
-        """Read n_frames from CAN, encode, and forward over the link."""
-        loop = asyncio.get_event_loop()
+        """Read n_frames from CAN, encode, and forward over the link.
+
+        Uses recv_async() (Notifier-based, event-driven) so the latency
+        baseline is measured with the same CAN machinery as Gateway, giving
+        a fair overhead comparison.
+        """
         sent = 0
         while sent < n_frames:
-            frame = await loop.run_in_executor(None, can_adapter.receive, 0.05)
-            if frame is not None:
-                encoded = MessageAdapter.encode(frame)
-                await link.send(encoded)
-                sent += 1
+            frame = await can_adapter.recv_async()
+            encoded = MessageAdapter.encode(frame)
+            await link.send(encoded)
+            sent += 1
 
     async def run_peer_side(
         self,

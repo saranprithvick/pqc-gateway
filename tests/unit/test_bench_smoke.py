@@ -102,10 +102,18 @@ class TestSummingHook:
         from pqcgw.bench.metrics import SummingHook
         h = SummingHook()
         t0 = h.before_crypto("test")
-        time.sleep(0.001)  # 1 ms
+        # Use a CPU-bound spin so thread_time_ns() records real execution time.
+        # time.sleep() does NOT count as CPU time, so it cannot be used here.
+        end = time.perf_counter_ns() + 1_000_000  # spin ≥ 1 ms wall
+        while time.perf_counter_ns() < end:
+            pass
         h.after_crypto("test", t0)
-        assert h.total_ns >= 500_000  # at least 0.5 ms
+        # total_ns is thread CPU time — must be > 0 and < the wall elapsed.
+        assert h.total_ns > 0
+        # total_wall_ns is wall time — must be ≥ 1 ms.
+        assert h.total_wall_ns >= 500_000
         assert h.counts["test"] == 1
+        assert h.per_label_ns.get("test", 0) == h.total_ns
 
     def test_reset(self):
         from pqcgw.bench.metrics import SummingHook
@@ -114,6 +122,7 @@ class TestSummingHook:
         h.after_crypto("x", t0)
         h.reset()
         assert h.total_ns == 0
+        assert h.total_wall_ns == 0
 
 
 class TestCollectEnv:

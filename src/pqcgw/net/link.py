@@ -24,6 +24,17 @@ class Link(ABC):
     async def recv(self, timeout: float = 1.0) -> Optional[bytes]:
         """Return the next message, or None if *timeout* elapses."""
 
+    async def recv_stream(self) -> bytes:
+        """Await indefinitely until a message arrives; for use in reader tasks.
+
+        Default implementation loops on recv(); subclasses should override
+        with a direct queue.get() to avoid asyncio.wait_for overhead.
+        """
+        while True:
+            msg = await self.recv(timeout=1.0)
+            if msg is not None:
+                return msg
+
 
 class LoopbackLink(Link):
     """In-memory paired link.  Each half's send() feeds the other's recv()."""
@@ -53,3 +64,7 @@ class LoopbackLink(Link):
             return await asyncio.wait_for(self._rx.get(), timeout=timeout)
         except asyncio.TimeoutError:
             return None
+
+    async def recv_stream(self) -> bytes:
+        """Direct queue.get() — no wait_for overhead; wakes immediately on arrival."""
+        return await self._rx.get()

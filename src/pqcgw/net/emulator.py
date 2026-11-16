@@ -86,6 +86,10 @@ class _EmulatedHalf(Link):
         except asyncio.TimeoutError:
             return None
 
+    async def recv_stream(self) -> bytes:
+        """Direct queue.get() — no wait_for overhead; wakes immediately on arrival."""
+        return await self._out.get()
+
 
 class LinkEmulator:
     """Bidirectional emulated link.  Use make_pair() to create."""

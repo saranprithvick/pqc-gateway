@@ -139,8 +139,10 @@ class Gateway:
         # Created in run() (needs event loop)
         self._hs_queue: Optional[asyncio.Queue] = None
 
-        # Epoch-change event for bench rekey measurement (one-shot; bench harness only)
+        # Epoch-change event for bench light-rekey measurement (one-shot; bench harness only)
         self._epoch_changed_event: Optional[asyncio.Event] = None
+        # Full-rekey completion event for bench full-rekey measurement (one-shot; bench harness only)
+        self._full_rekey_event: Optional[asyncio.Event] = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -198,6 +200,18 @@ class Gateway:
     def request_full_rekey(self) -> None:
         """Schedule a full rekey on the next run-loop iteration."""
         self._manual_full_rekey = True
+
+    def request_full_rekey_with_event(self) -> asyncio.Event:
+        """Schedule a full rekey and return an Event that fires when the new session is up.
+
+        Bench harness only.  The Event fires once the full-rekey task succeeds
+        and _full_rekey_pending is cleared.  Calling this while a full rekey is
+        already in progress is undefined behaviour.
+        """
+        event = asyncio.Event()
+        self._full_rekey_event = event
+        self._manual_full_rekey = True
+        return event
 
     def request_light_rekey_with_event(self) -> asyncio.Event:
         """Schedule a light rekey and return an Event that fires when the epoch advances.
@@ -566,10 +580,12 @@ class Gateway:
                 await _evt_q.put(("can", frame))
 
         async def _link_reader() -> None:
+            # recv_stream() uses a direct queue.get() with no asyncio.wait_for
+            # wrapper, so it wakes immediately when a message arrives without the
+            # extra scheduling overhead that wait_for introduces.
             while True:
-                raw = await self._link.recv(timeout=5.0)
-                if raw is not None:
-                    await _evt_q.put(("link", raw))
+                raw = await self._link.recv_stream()
+                await _evt_q.put(("link", raw))
 
         _can_task = asyncio.create_task(_can_reader())
         _link_task = asyncio.create_task(_link_reader())
@@ -642,6 +658,10 @@ class Gateway:
                         # Reset trigger counters for new session
                         self._records_sealed = self._bytes_sealed = 0
                         self._session_start = time.monotonic()
+                        # Fire bench measurement event (one-shot; bench harness only)
+                        if self._full_rekey_event is not None:
+                            self._full_rekey_event.set()
+                            self._full_rekey_event = None
                         # Flush CounterExhausted pending buffer
                         for frame in self._flush_pending():
                             await self.send_frame(frame)
