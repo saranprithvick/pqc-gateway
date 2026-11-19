@@ -478,9 +478,9 @@ async def _run_passthrough_latency(
 ) -> tuple[list[int], int]:
     """Measure C0 PassthroughPath latency and return (latency_ns_list, delivered).
 
-    Ingest timestamp is captured at the GATEWAY (after can_gw.recv_async()), not
-    at the sender, so the measurement is comparable to C1–C3 (which capture ingest
-    at gateway.send_frame() after CAN reception and event-queue dequeue).
+    Ingest timestamp is captured at the GATEWAY (after can_gw.recv_async()), at
+    the same asyncio hop depth as C1–C3 (which now capture ingest in _can_reader
+    at the first wake-up after CAN arrival, before the evt_q handoff).
     """
     emulator = LinkEmulator(net_cfg)
     gw_link = emulator.gateway_half

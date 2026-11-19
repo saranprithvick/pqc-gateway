@@ -53,11 +53,19 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M7 complete (committed b13b641 on main, 2026-11-15). 798 tests pass.
-`make bench` running (started 2026-11-15) — results will be in results/.
-After bench completes: report acceptance checks (handshake latency, loss5
-success rate, rekey timing, contact window); then start M8: README,
-docs/PROTOCOL.md, THREAT_MODEL.md, LIMITATIONS.md, results summary tables.
+**Current state (2026-11-20): WIP changes uncommitted — awaiting `make test` + user approval.**
+
+Three files modified, not yet committed:
+- `src/pqcgw/nodes/gateway.py` — ingest-timestamp alignment fix (see Post-M7 fix pass below)
+- `src/pqcgw/bench/e2e.py` — primitive-cost benchmark added, in-loop crypto timing removed, wake sentinel added
+- `docs/RESULTS_BRIEF.md` — all stale content updated (§3a, §3b, §3f, §6); HTML artifact republished
+
+**Exact next steps:**
+1. Run `make test` and verify all tests still pass (expected: ≥795).
+2. Commit the three files together with message:
+   `fix(bench+gateway+docs): post-M7 measurement fixes and results brief update`
+   (Do NOT push until user says so.)
+3. After commit: start M8 — README, docs/PROTOCOL.md, THREAT_MODEL.md, LIMITATIONS.md, results summary tables.
 
 ## Post-M7 bug-fix pass (commit b13b641, 2026-11-15, 798 tests pass)
 
