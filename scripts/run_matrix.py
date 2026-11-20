@@ -136,11 +136,13 @@ def _find_test_result(
     Looks for a test whose name contains both entry_id and test_pattern.
     Returns "passed", "failed", "skipped", "mechanism_absent", or "not_found".
     """
-    # Normalise entry_id for matching (pytest replaces / with -)
+    # Normalise entry_id for matching; also normalise test name since pytest
+    # keeps the original slash in the parametrize suffix (e.g. [matrix/k-512]).
     norm_entry = entry_id.replace("/", "-")
     for key, info in parsed.items():
         name = info["name"]
-        if norm_entry in name and test_pattern in name:
+        norm_name = name.replace("/", "-")
+        if norm_entry in norm_name and test_pattern in norm_name:
             return info["status"]
     return "not_found"
 

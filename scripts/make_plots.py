@@ -488,7 +488,11 @@ def main() -> None:
     plot_micro_aead_cdf(plt, args.show)
     plot_handshake_bars(plt, args.show)
     plot_overhead_bars(plt, args.show)
-    plot_rekey_sweep(plt, args.show)
+    _sweep_csv = Path("results/tables/rekey_sweep.csv")
+    if _sweep_csv.exists():
+        plot_rekey_sweep(plt, args.show)
+    else:
+        print("Skipping rekey_sweep plot: rekey_sweep.csv not present (removed as future work)")
     plot_contact_window_heatmap(plt, args.show)
     print("Done.")
 

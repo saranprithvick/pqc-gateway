@@ -23,6 +23,8 @@ bench:
 	.venv/bin/python -m pqcgw.bench.micro
 	@echo "--- End-to-end benchmarks ---"
 	.venv/bin/python -m pqcgw.bench.e2e
+	@echo "--- Augment overhead with amortised handshake bytes ---"
+	.venv/bin/python -m pqcgw.bench.e2e --aggregate-only O
 	@echo "--- Agility matrix + security tests ---"
 	.venv/bin/python scripts/run_matrix.py
 	@echo "--- Security results table ---"
@@ -35,3 +37,5 @@ bench:
 	.venv/bin/python -m pqcgw.bench.analytical.beacon_cost
 	@echo "--- Plots ---"
 	.venv/bin/python scripts/make_plots.py
+	@echo "--- Results brief ---"
+	.venv/bin/python scripts/make_brief.py

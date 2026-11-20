@@ -5,7 +5,7 @@ Sub-runs per configuration × network profile:
      bytes per message, fragment count, success rate — ≥ 200 trials
   B. Latency at scenario rate: gateway CAN ingest → peer delivery (median/p95/p99)
   C. Throughput saturation + peak memory (tracemalloc, NOT inside timed region)
-  D. Rekey cost: light rekey ×20, light rekey interval sweep, full rekey ×10
+  D. Rekey cost: light rekey ×20, full rekey ×10 (interval sweep removed — deferred to future work)
 
 Configurations: C0 (passthrough), C1 (classical), C2 (pqc), C3 (hybrid)
 Network profiles: ideal, delay5, delay20, delay50, loss1, loss5, bw6000
@@ -87,7 +87,6 @@ _N_DATA_FRAMES = 1000  # frames for latency sub-run (§8)
 _DATA_RATE_HZ = 100.0  # §6 scenario rate
 _REKEY_LIGHT_TRIALS = 20
 _REKEY_FULL_TRIALS = 10
-_REKEY_INTERVALS = [10, 20, 50, 100, 200, 500, 1000, 5000]  # one-factor sweep
 
 _ALLOWED_SUITES = [1, 2, 3]  # C1, C2, C3
 
@@ -382,6 +381,8 @@ def run_handshake_trials(
             "bytes_hello_r": _med_int("bytes_hello_r"),
             "bytes_finished_i": _med_int("bytes_finished_i"),
             "bytes_finished_r": _med_int("bytes_finished_r"),
+            "frags_i2r_median": _med_int("frags_i2r"),
+            "frags_r2i_median": _med_int("frags_r2i"),
             "bytes_total_hs": total_hs_med,
             "bytes_total_hs_onwire": total_hs_onwire_med,
             **{f"amortised_overhead_{n}": round(total_hs_med / n, 2)
@@ -815,68 +816,6 @@ async def _measure_light_rekey(suite_name: str, net_cfg: NetworkConfig, chan: st
     }
 
 
-def _run_rekey_interval_sweep(suite_name: str, net_cfg: NetworkConfig, env: dict) -> None:
-    """Light rekey interval sweep: vary record_count trigger; record overhead bytes/frame."""
-    _N_SWEEP_FRAMES = 1000
-    rows: list[dict] = []
-    for interval in _REKEY_INTERVALS:
-        chan = _unique_channel()
-        try:
-            r = asyncio.run(
-                _run_rekey_sweep_trial(suite_name, net_cfg, chan, interval, _N_SWEEP_FRAMES),
-                debug=False,
-            )
-            rows.append({
-                "config": "c3",
-                "profile": "ideal",
-                "rekey_interval": interval,
-                **r,
-            })
-            print(f"      sweep interval={interval}: rekeys={r['rekey_count']}")
-        except Exception as exc:
-            print(f"      sweep interval={interval}: FAILED — {exc}")
-
-    if rows:
-        write_csv(_TABLES_DIR / "rekey_sweep.csv", rows, env)
-        print(f"  [D-sweep] wrote {len(rows)} rows to rekey_sweep.csv")
-
-
-async def _run_rekey_sweep_trial(
-    suite_name: str, net_cfg: NetworkConfig, chan: str, interval: int, n_frames: int
-) -> dict:
-    """Run n_frames at a fixed rekey interval; return bytes sent and rekey count."""
-    suite = load_suite(_SUITE_DIR / f"{suite_name}.toml")
-    gw_id, peer_id = _make_identities(suite)
-    emulator = LinkEmulator(net_cfg)
-    gw_link = emulator.gateway_half
-    peer_link = emulator.peer_half
-    sink: asyncio.Queue[CANFrame] = asyncio.Queue()
-
-    rekey_trig = RekeyTrigger(record_count=interval)
-    rekey_cfg = RekeyConfig(rekey_timeout_ms=400, rekey_max_retries=3)
-
-    with CanAdapter(chan) as can, CanAdapter(chan) as injector:
-        gw = Gateway(suite, gw_id, can, gw_link,
-                     rekey_config=rekey_cfg, trigger=rekey_trig)
-        peer = ModernPeer(suite, peer_id, peer_link, sink, rekey_config=rekey_cfg)
-        _gw_hs = asyncio.create_task(gw.handshake())
-        _peer_hs = asyncio.create_task(peer.handshake())
-        await asyncio.wait_for(asyncio.gather(_gw_hs, _peer_hs), timeout=10.0)
-
-        gw_task = asyncio.create_task(gw.run(n_frames=n_frames))
-        peer_task = asyncio.create_task(peer.run(n_frames=n_frames))
-        # Inject via a separate adapter so the gateway's bus receives them.
-        for i in range(n_frames):
-            injector.send(CANFrame(can_id=0x100, dlc=_FRAME_DLC,
-                                   data=bytes([i % 256] * _FRAME_DLC)))
-        await asyncio.wait_for(asyncio.gather(gw_task, peer_task), timeout=120.0)
-
-    return {
-        "rekey_count": (gw._sm.epoch if gw._sm else 0),
-        "n_frames": n_frames,
-    }
-
-
 async def _measure_full_rekey(
     suite_name: str,
     net_cfg: NetworkConfig,
@@ -977,7 +916,7 @@ async def _measure_full_rekey(
 
 
 def run_rekey_cost(config: str, profile: str, env: dict, run_order_index: int = 0) -> None:
-    """Sub-run D: light-rekey cost ×20 + full-rekey cost ×10 + interval sweep (C3/ideal only)."""
+    """Sub-run D: light-rekey cost ×20 + full-rekey cost ×10."""
     if config == "c0":
         print(f"  [D] {config}/{profile}: C0 has no rekey — skipping")
         return
@@ -1039,10 +978,6 @@ def run_rekey_cost(config: str, profile: str, env: dict, run_order_index: int = 
                         "run_order_index": run_order_index,
                         "type": "full", **st_f.as_dict("time_")}], env)
 
-    # Interval sweep: only for C3 on ideal profile (§plan sub-run D)
-    if config == "c3" and profile == "ideal":
-        net_ideal = _net_config("ideal", seed=base_seed)
-        _run_rekey_interval_sweep(suite_name, net_ideal, env)
 
 
 # ---------------------------------------------------------------------------
@@ -1160,6 +1095,75 @@ def measure_overhead(config: str, dlc: int = _FRAME_DLC) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Post-run aggregation: augment overhead.csv with amortised HS bytes
+# ---------------------------------------------------------------------------
+
+def augment_overhead_with_hs_amortised() -> None:
+    """Add amortised on-wire HS bytes per record to overhead.csv.
+
+    Reads the ideal-profile row for each config from handshake.csv (written by
+    sub-run A) and appends three new columns to overhead.csv:
+      amortised_hs_per_record_100 / _1000 / _10000
+    These are bytes_total_hs_onwire / N — wire bytes including fragment headers.
+    C0 gets 0 (no handshake).  Skips silently if either input is absent.
+    """
+    import csv as _csv
+
+    hs_path = _TABLES_DIR / "handshake.csv"
+    overhead_path = _TABLES_DIR / "overhead.csv"
+
+    if not hs_path.exists():
+        print("augment_overhead: handshake.csv not found — skipping")
+        return
+    if not overhead_path.exists():
+        print("augment_overhead: overhead.csv not found — skipping")
+        return
+
+    # Read handshake.csv; skip # comment lines; keep ideal rows.
+    with open(hs_path, newline="") as fh:
+        lines = [ln for ln in fh if not ln.startswith("#")]
+    hs_ideal: dict[str, dict] = {}
+    for row in _csv.DictReader(lines):
+        if row.get("profile") == "ideal":
+            hs_ideal[row["config"]] = row
+
+    # Read overhead.csv; preserve comment header lines exactly.
+    comment_lines: list[str] = []
+    data_lines: list[str] = []
+    with open(overhead_path, newline="") as fh:
+        for ln in fh:
+            if ln.startswith("#"):
+                comment_lines.append(ln)
+            else:
+                data_lines.append(ln)
+
+    reader = _csv.DictReader(data_lines)
+    rows = list(reader)
+    fieldnames = list(reader.fieldnames or [])
+
+    new_cols = [f"amortised_hs_per_record_{n}" for n in _AMORTISE_SESSIONS]
+    for col in new_cols:
+        if col not in fieldnames:
+            fieldnames.append(col)
+
+    for row in rows:
+        config = row["config"]
+        hs = hs_ideal.get(config)
+        onwire = float(hs["bytes_total_hs_onwire"]) if hs else 0.0
+        for n in _AMORTISE_SESSIONS:
+            row[f"amortised_hs_per_record_{n}"] = round(onwire / n, 2) if onwire > 0 else 0.0
+
+    overhead_path.unlink(missing_ok=True)
+    with open(overhead_path, "w", newline="") as fh:
+        fh.writelines(comment_lines)
+        writer = _csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"augment_overhead: added amortised HS columns to {overhead_path.name}")
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -1180,7 +1184,7 @@ def run(
     # Unlink all summary tables so each run starts from a clean slate.
     # Raw files are kept (timestamped in filenames) so previous runs are not lost.
     for _fname in ["handshake.csv", "latency.csv", "throughput.csv",
-                   "rekey_cost.csv", "rekey_sweep.csv", "primitive_cost.csv"]:
+                   "rekey_cost.csv", "primitive_cost.csv"]:
         (_TABLES_DIR / _fname).unlink(missing_ok=True)
 
     # Write overhead decomposition table (always overwrite — it's deterministic)
@@ -1223,7 +1227,15 @@ if __name__ == "__main__":
                         help="Skip sub-run A (handshake) — use when already complete")
     parser.add_argument("--sub", nargs="*", choices=["A", "B", "C", "D", "P"],
                         help="Run only these sub-runs (default: all; P=primitive cost)")
+    parser.add_argument("--aggregate-only", nargs="+", choices=["O"], metavar="OP",
+                        help="Run aggregate-only ops (O=augment overhead.csv with HS bytes) "
+                             "without a full benchmark run; does not unlink any summary tables")
     args = parser.parse_args()
+    if args.aggregate_only:
+        for op in args.aggregate_only:
+            if op == "O":
+                augment_overhead_with_hs_amortised()
+        sys.exit(0)
     run(
         args.config,
         args.profile,
