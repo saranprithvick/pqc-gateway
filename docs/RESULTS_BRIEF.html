@@ -50,6 +50,11 @@ th, td { border: 1px solid var(--border); padding: 0.45rem 0.75rem;
   white-space: nowrap; }
 tr:nth-child(even) td { background: var(--tr-alt); }
 .meta { color: var(--fg-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+figure { margin: 1.5rem 0; text-align: center; }
+figure img { max-width: 100%; height: auto; border: 1px solid var(--border);
+  border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
+  font-style: italic; }
 
 </style>
 </head>
@@ -285,15 +290,20 @@ tr:nth-child(even) td { background: var(--tr-alt); }
 </ol>
 <hr>
 <h2 id="14-figures">§14 Figures</h2>
-<ul>
-<li><strong>micro_keygen.png:</strong> KEM and signature key-generation time by algorithm (median µs, log scale).</li>
-<li><strong>micro_ops.png:</strong> encaps/decaps/sign/verify median µs by algorithm (log scale).</li>
-<li><strong>micro_aead.png:</strong> AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B).</li>
-<li><strong>latency_cdf.png:</strong> Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms.</li>
-<li><strong>handshake_bars.png:</strong> Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms.</li>
-<li><strong>e2e_overhead.png:</strong> Per-layer overhead bytes per record for C0–C3 (stacked bar).</li>
-<li><strong>contact_window_heat.png:</strong> Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5).</li>
-</ul>
+<figure><img src="../results/figures/micro_keygen.png" alt="KEM and signature key-generation time by algorithm (median µs, log scale)." loading="lazy"></figure>
+<p><em>KEM and signature key-generation time by algorithm (median µs, log scale).</em></p>
+<figure><img src="../results/figures/micro_ops.png" alt="encaps/decaps/sign/verify median µs by algorithm (log scale)." loading="lazy"></figure>
+<p><em>encaps/decaps/sign/verify median µs by algorithm (log scale).</em></p>
+<figure><img src="../results/figures/micro_aead.png" alt="AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B)." loading="lazy"></figure>
+<p><em>AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B).</em></p>
+<figure><img src="../results/figures/latency_cdf.png" alt="Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms." loading="lazy"></figure>
+<p><em>Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms.</em></p>
+<figure><img src="../results/figures/handshake_bars.png" alt="Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms." loading="lazy"></figure>
+<p><em>Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms.</em></p>
+<figure><img src="../results/figures/e2e_overhead.png" alt="Per-layer overhead bytes per record for C0–C3 (stacked bar)." loading="lazy"></figure>
+<p><em>Per-layer overhead bytes per record for C0–C3 (stacked bar).</em></p>
+<figure><img src="../results/figures/contact_window_heat.png" alt="Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5)." loading="lazy"></figure>
+<p><em>Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5).</em></p>
 <hr>
 </div>
 </body>

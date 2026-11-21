@@ -703,7 +703,10 @@ def _section_figures() -> str:
 
     lines = ["## §14 Figures\n"]
     for fname, caption in figs:
-        lines.append(f"- **{fname}:** {caption}")
+        # Relative path from docs/ to results/figures/
+        rel = f"../results/figures/{fname}"
+        lines.append(f"![{caption}]({rel})\n")
+        lines.append(f"*{caption}*\n")
     lines.append("\n---\n")
     return "\n".join(lines)
 
@@ -758,6 +761,11 @@ th, td { border: 1px solid var(--border); padding: 0.45rem 0.75rem;
   white-space: nowrap; }
 tr:nth-child(even) td { background: var(--tr-alt); }
 .meta { color: var(--fg-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+figure { margin: 1.5rem 0; text-align: center; }
+figure img { max-width: 100%; height: auto; border: 1px solid var(--border);
+  border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
+  font-style: italic; }
 """
 
 
@@ -871,6 +879,15 @@ def _md_to_html(md: str) -> str:
             continue
         elif in_table:
             flush_table()
+
+        # Block image: ![alt](src)
+        m = _re.match(r"^!\[([^\]]*)\]\(([^)]+)\)$", stripped)
+        if m:
+            flush_all()
+            alt = _escape(m.group(1))
+            src = _escape(m.group(2))
+            body.append(f'<figure><img src="{src}" alt="{alt}" loading="lazy"></figure>')
+            continue
 
         # Headings
         m = _re.match(r"^(#{1,3})\s+(.*)", line)
