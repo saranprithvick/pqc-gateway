@@ -2,24 +2,26 @@
 # os,macOS-26.6.2-arm64-arm-64bit-Mach-O
 # cpu,arm
 # liboqs_version,unknown
-# git_commit,23f428b238c27c451b39322b0ef4aafe3c248804
-# timestamp,2026-11-16T19:15:15Z
+# liboqs_python_version,0.16.0.2
+# git_commit,5c9a1973761e51712c567c13d578c823edf8cb44
+# timestamp,2026-11-20T17:49:45Z
 # no_slow,False
+# experimental,matrix-x-falcon512 matrix-x-hqc3
 #
 # Legend: 'expected ✓' = test passed with expected outcome;,'expected ✗' = test failed or unexpected outcome;,'n/a' = test not applicable for this config (see §9);,'mechanism_absent' = mechanism not in installed liboqs.
 # C0 tests for T1/T2/T3/T12: 'accepted ✓' means attack succeeded,"(vulnerability confirmed, not a failure — expected per §9)"
 #
-test,C0,C1,C2,C3,matrix-a-128,matrix-a-cha,matrix-base,matrix-d-384,matrix-k-1024,matrix-k-512,matrix-k-768,matrix-s-44,matrix-s-87,matrix-s-ecdsa,matrix-s-slh,matrix-x-falcon512,matrix-x-hqc3,unknown
-T1,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,not_run
-T2,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,not_run
-T3,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,not_run
-T4,not_run,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,not_run
-T5,not_run,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,not_run
-T6,not_run,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,not_run
-T7,not_run,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,rejects ✓,not_run
-T8,not_run,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,not_run
-T9,not_run,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓
-T10,not_run,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,not_run
-T11,not_run,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,not_run
-T12,forwarded ✓,forwarded ✓,forwarded ✓,forwarded ✓,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run,not_run
-T13,not_run,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,not_run
+test,C0,C1,C2,C3,matrix-a-128,matrix-a-cha,matrix-base,matrix-d-384,matrix-k-1024,matrix-k-512,matrix-k-768,matrix-s-44,matrix-s-87,matrix-s-ecdsa,matrix-s-slh,matrix-x-falcon512,matrix-x-hqc3
+T1,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓
+T2,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓
+T3,accepted ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓
+T4,n/a,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓
+T5,n/a,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓
+T6,n/a,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓,aborts ✓
+T7,n/a,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓,in-window once / dup rejected ✓
+T8,n/a,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓,survives ✓
+T9,n/a,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓,no-reuse ✓
+T10,n/a,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓,rekeys ✓
+T11,n/a,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓,rejected ✓
+T12,forwarded ✓,forwarded ✓,forwarded ✓,forwarded ✓,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
+T13,n/a,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓,fails ✓
