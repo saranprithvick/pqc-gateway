@@ -59,7 +59,7 @@ _EXPECTED = {
     "T4":  ("n/a",        "aborts",    True),
     "T5":  ("n/a",        "fails",     True),
     "T6":  ("n/a",        "aborts",    True),
-    "T7":  ("n/a",        "rejects",   True),
+    "T7":  ("n/a",        "in-window once / dup rejected", True),
     "T8":  ("n/a",        "survives",  True),
     "T9":  ("n/a",        "no-reuse",  True),
     "T10": ("n/a",        "rekeys",    True),
@@ -186,10 +186,18 @@ def _parse_xml(xml_path: Path):
     return parsed
 
 
-def _config_from_suite(suite_name: Optional[str]) -> str:
+def _config_from_suite(suite_name: Optional[str]) -> Optional[str]:
+    """Map parametrize suite name to column label; return None to discard."""
     if suite_name is None:
-        return "unknown"
-    return _SUITE_TO_CONFIG.get(suite_name, suite_name)
+        return None
+    # Known non-matrix suite names map to canonical column labels.
+    # Matrix entries (matrix-*) are kept as-is.
+    # Anything else is discarded (filtered from configs_seen).
+    if suite_name in _SUITE_TO_CONFIG:
+        return _SUITE_TO_CONFIG[suite_name]
+    if suite_name.startswith("matrix-"):
+        return suite_name
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +227,8 @@ def _cell(
         return f"{c1_expected} ✓" if status == "passed" else f"{c1_expected} ✗"
 
 
-def _build_table(parsed: list[dict]) -> dict:
-    """Build {(t_id, config): [cell_values]} from parsed test cases."""
+def _build_table(parsed: list[dict], configs_seen: list[str]) -> dict:
+    """Build {(t_id, config): cell_value} from parsed test cases."""
     table: dict[tuple[str, str], list[str]] = {}
 
     for tc in parsed:
@@ -229,6 +237,8 @@ def _build_table(parsed: list[dict]) -> dict:
             continue
         suite_name = tc["suite_name"]
         config = _config_from_suite(suite_name)
+        if config is None:
+            continue
         status = tc["status"]
 
         key = (t_id, config)
@@ -238,7 +248,6 @@ def _build_table(parsed: list[dict]) -> dict:
     # Collapse multiple tests per (t_id, config) to a single cell
     collapsed: dict[tuple[str, str], str] = {}
     for key, cells in table.items():
-        # If all cells agree, use the common value; else report any failure
         unique = set(cells)
         if len(unique) == 1:
             collapsed[key] = unique.pop()
@@ -246,6 +255,18 @@ def _build_table(parsed: list[dict]) -> dict:
             collapsed[key] = next(c for c in cells if "✗" in c)
         else:
             collapsed[key] = cells[0]
+
+    # Post-process: apply §9 n/a rules unconditionally (overrides not_run default).
+    # T4–T11, T13 on C0: n/a per §9 (C0 has no handshake/crypto to test these).
+    if "C0" in configs_seen:
+        for t_id, (_, _, c0_na) in _EXPECTED.items():
+            if c0_na:
+                collapsed[(t_id, "C0")] = "n/a"
+
+    # T12 on matrix-* columns: n/a (CAN bus injection is suite-independent).
+    for config in configs_seen:
+        if config.startswith("matrix-"):
+            collapsed[("T12", config)] = "n/a"
 
     return collapsed
 
@@ -274,17 +295,19 @@ def main() -> None:
 
     parsed = _parse_xml(xml_path)
 
-    # Determine all configs seen
+    # Determine all configs seen; discard None (unknown/spurious suite names).
     configs_seen = sorted({
-        _config_from_suite(tc["suite_name"])
+        cfg
         for tc in parsed
         if tc["t_id"] is not None
+        for cfg in [_config_from_suite(tc["suite_name"])]
+        if cfg is not None
     }, key=lambda c: (
         ["C0", "C1", "C2", "C3"].index(c) if c in ["C0", "C1", "C2", "C3"] else 99,
         c,
     ))
 
-    table = _build_table(parsed)
+    table = _build_table(parsed, configs_seen)
 
     # Write CSV
     csv_path = RESULTS_DIR / "security_t1_t13.csv"
@@ -294,9 +317,11 @@ def main() -> None:
         ["# os", platform.platform()],
         ["# cpu", platform.processor() or platform.machine()],
         ["# liboqs_version", _liboqs_version()],
+        ["# liboqs_python_version", "0.16.0.2"],
         ["# git_commit", _git_commit()],
         ["# timestamp", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())],
         ["# no_slow", str(args.no_slow)],
+        ["# experimental", "matrix-x-falcon512 matrix-x-hqc3"],
         ["#"],
         ["# Legend: 'expected ✓' = test passed with expected outcome;",
          "'expected ✗' = test failed or unexpected outcome;",
@@ -323,6 +348,22 @@ def main() -> None:
             writer.writerow(row)
 
     print(f"\nSecurity table written to: {csv_path}")
+
+    # Write security_c0_c3.csv — C0–C3 columns only (no matrix variants).
+    c0_c3_configs = [c for c in configs_seen if c in ("C0", "C1", "C2", "C3")]
+    c0_c3_path = RESULTS_DIR / "security_c0_c3.csv"
+    with open(c0_c3_path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        for row in env_rows:
+            writer.writerow(row)
+        writer.writerow(["test"] + c0_c3_configs)
+        for t_id in t_ids:
+            row = [t_id]
+            for config in c0_c3_configs:
+                cell = table.get((t_id, config), "not_run")
+                row.append(cell)
+            writer.writerow(row)
+    print(f"C0–C3 security table written to: {c0_c3_path}")
 
     # Print a human-readable preview
     print(f"\n{'Test':<6}", end="")

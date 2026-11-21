@@ -53,11 +53,30 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-M7 complete (committed b13b641 on main, 2026-11-15). 798 tests pass.
-`make bench` running (started 2026-11-15) — results will be in results/.
-After bench completes: report acceptance checks (handshake latency, loss5
-success rate, rekey timing, contact window); then start M8: README,
-docs/PROTOCOL.md, THREAT_MODEL.md, LIMITATIONS.md, results summary tables.
+**Current state (2026-11-20): Phase 1 code changes complete — awaiting `make test` + commit, then Phase 2 bench rerun.**
+
+Files modified in m7-fixes-wip (Phase 1):
+- `src/pqcgw/bench/e2e.py` — removed rekey interval sweep; added frags_i2r/r2i_median to handshake summary; added augment_overhead_with_hs_amortised(); added --aggregate-only CLI flag
+- `scripts/run_matrix.py` — 1-line fix in _find_test_result: normalize `/` → `-` in XML test name before substring search
+- `scripts/make_security_table.py` — T7 label fix; _config_from_suite returns None for unknown; _build_table post-processes n/a cells; liboqs_python_version + experimental metadata; security_c0_c3.csv output
+- `scripts/make_plots.py` — guard plot_rekey_sweep with existence check
+- `scripts/make_brief.py` — NEW: generates docs/RESULTS_BRIEF.md from results/tables/ only
+- `Makefile` — added --aggregate-only O step and make_brief.py to bench target
+
+**Exact next steps:**
+1. Run `make test` and verify all tests still pass (expected: ≥795).
+2. Commit Phase 1 code changes on m7-fixes-wip.
+3. Phase 2: `rm -rf results/raw/*` → `make bench` → verify all CSV metadata share same git_commit → commit results.
+4. Do NOT push or merge until user says so.
+5. After results freeze: start M8 — README, docs/PROTOCOL.md, THREAT_MODEL.md, LIMITATIONS.md, results summary tables.
+
+## Deferred to future work
+
+**Rekey interval sweep (removed M7, 2026-11-20):** `_run_rekey_interval_sweep` and
+`rekey_sweep.csv` removed from `e2e.py` and from the bench Makefile target. The sweep
+(C3/ideal, 8 intervals from 10–5000 records, 1000 frames each) was implemented in
+earlier sessions but is not part of the freeze results. Constants `_REKEY_INTERVALS` and
+`_N_SWEEP_FRAMES` removed. Deferred to future work (stretch goal after M8).
 
 ## Post-M7 bug-fix pass (commit b13b641, 2026-11-15, 798 tests pass)
 

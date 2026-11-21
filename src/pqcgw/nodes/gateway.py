@@ -385,10 +385,16 @@ class Gateway:
     # Data-path helpers
     # ------------------------------------------------------------------
 
-    async def send_frame(self, frame: CANFrame) -> None:
-        """Encode → seal → send.  On CounterExhausted: buffer + send REKEY_REQ."""
+    async def send_frame(self, frame: CANFrame, ingest_ns: Optional[int] = None) -> None:
+        """Encode → seal → send.  On CounterExhausted: buffer + send REKEY_REQ.
+
+        ingest_ns: CAN ingest timestamp captured by _can_reader at the first asyncio
+        wake-up after CAN arrival.  If None (pre-session frames, flush-pending path),
+        falls back to perf_counter_ns() at processing time.
+        """
         assert self._sm is not None
-        ingest_ns = time.perf_counter_ns()  # CAN ingest timestamp (§8, plan step 6)
+        if ingest_ns is None:
+            ingest_ns = time.perf_counter_ns()  # fallback: pre-session / flush path
         encoded = MessageAdapter.encode(frame)
         try:
             wire = self._sm.seal(encoded)
@@ -581,13 +587,19 @@ class Gateway:
         self._evt_q = _evt_q  # expose for request_*_rekey_with_event() wake sentinels
 
         for frame in list(self._pre_session_buf):
-            _evt_q.put_nowait(("can", frame))
+            # Pre-session frames have no CAN-reader ingest timestamp; pass None so
+            # send_frame() falls back to perf_counter_ns() at processing time.
+            _evt_q.put_nowait(("can", (frame, None)))
         self._pre_session_buf.clear()
 
         async def _can_reader() -> None:
             while True:
                 frame = await self._can.recv_async()
-                await _evt_q.put(("can", frame))
+                # Capture ingest timestamp at the first asyncio wake-up after CAN
+                # arrival (same hop depth as C0's _gw_side), so the latency
+                # measurement scope is consistent across all configurations.
+                ingest_ns = time.perf_counter_ns()
+                await _evt_q.put(("can", (frame, ingest_ns)))
 
         async def _link_reader() -> None:
             # recv_stream() uses a direct queue.get() with no asyncio.wait_for
@@ -686,7 +698,8 @@ class Gateway:
                     continue  # wake sentinel: re-enter loop to process step 1 flags
 
                 if kind == "can":
-                    await self.send_frame(value)
+                    frame, ingest_ns = value
+                    await self.send_frame(frame, ingest_ns=ingest_ns)
                     frames_sent += 1
                     # Eagerly fire auto-trigger so _has_pending_work() sees
                     # REQ_SENT on the next loop-condition check.  Needed when

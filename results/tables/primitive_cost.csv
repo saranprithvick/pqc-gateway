@@ -4,10 +4,10 @@
 # cpu: arm
 # liboqs_version: 0.16.0
 # cryptography_version: 50.0.2
-# git_commit: 23f428b
+# git_commit: 5c9a197
 # seed: 0
-# timestamp: 2026-11-16T18:53:31Z
+# timestamp: 2026-11-20T15:15:01Z
 config,suite,cost_median_ns,cost_p95_ns,cost_p99_ns,cost_n
-c1,classical,328125.0,335710.1,341375.84,1000
-c2,pqc,346021.0,469708.05,559484.41,1000
-c3,hybrid,657937.5,790497.6,860356.91,1000
+c1,classical,327541.0,336589.25,341792.68,1000
+c2,pqc,344333.5,467628.85,579235.08,1000
+c3,hybrid,661812.5,793999.7,884763.58,1000
