@@ -267,31 +267,17 @@ Additional limitations:
 
 ![KEM and signature key-generation time by algorithm (median µs, log scale).](../results/figures/micro_keygen.png)
 
-*KEM and signature key-generation time by algorithm (median µs, log scale).*
-
 ![encaps/decaps/sign/verify median µs by algorithm (log scale).](../results/figures/micro_ops.png)
-
-*encaps/decaps/sign/verify median µs by algorithm (log scale).*
 
 ![AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B).](../results/figures/micro_aead.png)
 
-*AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B).*
-
 ![Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms.](../results/figures/latency_cdf.png)
-
-*Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms.*
 
 ![Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms.](../results/figures/handshake_bars.png)
 
-*Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms.*
-
 ![Per-layer overhead bytes per record for C0–C3 (stacked bar).](../results/figures/e2e_overhead.png)
 
-*Per-layer overhead bytes per record for C0–C3 (stacked bar).*
-
 ![Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5).](../results/figures/contact_window_heat.png)
-
-*Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5).*
 
 
 ---

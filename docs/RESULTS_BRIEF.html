@@ -70,6 +70,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Item</th><th>Value</th></tr></thead>
 <tbody>
+<tr><td>Platform</td><td>Apple arm64, macOS 25.6.0</td></tr>
 <tr><td>Python</td><td>3.13.2</td></tr>
 <tr><td>liboqs</td><td>0.16.0</td></tr>
 <tr><td>liboqs-python</td><td>0.16.0.2</td></tr>
@@ -80,6 +81,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>ID</th><th>Name</th><th>KEM</th><th>Signature</th><th>KDF</th><th>AEAD</th></tr></thead>
 <tbody>
+<tr><td>C0</td><td>Passthrough</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
 <tr><td>C1</td><td>Classical</td><td>X25519</td><td>ECDSA-P256</td><td>HKDF-SHA-256</td><td>AES-256-GCM</td></tr>
 <tr><td>C2</td><td>PQC-only</td><td>ML-KEM-768</td><td>ML-DSA-65</td><td>HKDF-SHA-256</td><td>AES-256-GCM</td></tr>
 <tr><td>C3</td><td>Hybrid</td><td>X25519 + ML-KEM-768</td><td>ECDSA-P256 + ML-DSA-65 (dual)</td><td>HKDF-SHA-256</td><td>AES-256-GCM</td></tr>
@@ -90,6 +92,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Test</th><th>C0</th><th>C1</th><th>C2</th><th>C3</th></tr></thead>
 <tbody>
+<tr><td>T1</td><td>accepted ✓</td><td>rejected ✓</td><td>rejected ✓</td><td>rejected ✓</td></tr>
 <tr><td>T2</td><td>accepted ✓</td><td>rejected ✓</td><td>rejected ✓</td><td>rejected ✓</td></tr>
 <tr><td>T3</td><td>accepted ✓</td><td>rejected ✓</td><td>rejected ✓</td><td>rejected ✓</td></tr>
 <tr><td>T4</td><td>n/a</td><td>aborts ✓</td><td>aborts ✓</td><td>aborts ✓</td></tr>
@@ -110,6 +113,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Config</th><th>Profile</th><th>Wall median (ms)</th><th>Wall p95 (ms)</th><th>HS bytes (wire)</th><th>Frags I→R</th><th>Frags R→I</th><th>Success rate</th></tr></thead>
 <tbody>
+<tr><td>C1</td><td>ideal</td><td>2.54</td><td>3.60</td><td>386</td><td>2</td><td>2</td><td>100.0%</td></tr>
 <tr><td>C1</td><td>delay50</td><td>209.97</td><td>212.63</td><td>386</td><td>2</td><td>2</td><td>100.0%</td></tr>
 <tr><td>C1</td><td>loss5</td><td>26.37</td><td>229.71</td><td>386</td><td>2</td><td>2</td><td>100.0%</td></tr>
 <tr><td>C1</td><td>bw6000</td><td>29.72</td><td>33.50</td><td>386</td><td>2</td><td>2</td><td>100.0%</td></tr>
@@ -129,6 +133,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Config</th><th>Suite</th><th>Median (ms)</th><th>p95 (ms)</th><th>p99 (ms)</th><th>n</th></tr></thead>
 <tbody>
+<tr><td>C1</td><td>classical</td><td>0.33</td><td>0.34</td><td>0.34</td><td>1000</td></tr>
 <tr><td>C2</td><td>pqc</td><td>0.34</td><td>0.47</td><td>0.58</td><td>1000</td></tr>
 <tr><td>C3</td><td>hybrid</td><td>0.66</td><td>0.79</td><td>0.88</td><td>1000</td></tr>
 </tbody>
@@ -139,6 +144,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Config</th><th>CAN framing (B)</th><th>Frag header (B)</th><th>Prefix (B)</th><th>Record header (B)</th><th>AEAD tag (B)</th><th>Total overhead (B)</th><th>HS amortised/100 rec</th><th>HS amortised/1k rec</th><th>HS amortised/10k rec</th></tr></thead>
 <tbody>
+<tr><td>C0</td><td>5</td><td>8</td><td>0</td><td>0</td><td>0</td><td>13</td><td>0.0</td><td>0.0</td><td>0.0</td></tr>
 <tr><td>C1</td><td>5</td><td>8</td><td>1</td><td>16</td><td>16</td><td>46</td><td>3.86</td><td>0.39</td><td>0.04</td></tr>
 <tr><td>C2</td><td>5</td><td>8</td><td>1</td><td>16</td><td>16</td><td>46</td><td>91.24</td><td>9.12</td><td>0.91</td></tr>
 <tr><td>C3</td><td>5</td><td>8</td><td>1</td><td>16</td><td>16</td><td>46</td><td>93.4</td><td>9.34</td><td>0.93</td></tr>
@@ -150,6 +156,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Algorithm</th><th>Operation</th><th>Payload (B)</th><th>Median (µs)</th><th>p95 (µs)</th><th>p99 (µs)</th><th>n</th></tr></thead>
 <tbody>
+<tr><td>X25519 (KEM wrapper)</td><td>kem_keygen</td><td>—</td><td>22.9</td><td>23.5</td><td>28.2</td><td>1000</td></tr>
 <tr><td>X25519 (KEM wrapper)</td><td>kem_encaps</td><td>—</td><td>44.6</td><td>45.8</td><td>52.1</td><td>1000</td></tr>
 <tr><td>X25519 (KEM wrapper)</td><td>kem_decaps</td><td>—</td><td>43.1</td><td>43.8</td><td>49.4</td><td>1000</td></tr>
 <tr><td>ECDSA-P256</td><td>sig_keygen</td><td>—</td><td>15.4</td><td>17.8</td><td>22.5</td><td>1000</td></tr>
@@ -180,6 +187,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Config</th><th>Latency median (ms)</th><th>Latency p95 (ms)</th><th>Delivery ratio</th><th>n</th></tr></thead>
 <tbody>
+<tr><td>C0</td><td>0.13</td><td>0.23</td><td>100.0%</td><td>1000</td></tr>
 <tr><td>C1</td><td>0.22</td><td>0.37</td><td>100.0%</td><td>1000</td></tr>
 <tr><td>C2</td><td>0.23</td><td>0.35</td><td>100.0%</td><td>1000</td></tr>
 <tr><td>C3</td><td>0.25</td><td>0.46</td><td>100.0%</td><td>1000</td></tr>
@@ -191,6 +199,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Config</th><th>Type</th><th>Median (ms)</th><th>Min (ms)</th><th>Max (ms)</th><th>n</th></tr></thead>
 <tbody>
+<tr><td>C1</td><td>light</td><td>0.70</td><td>0.31</td><td>1.22</td><td>20</td></tr>
 <tr><td>C2</td><td>light</td><td>0.75</td><td>0.32</td><td>1.18</td><td>20</td></tr>
 <tr><td>C3</td><td>light</td><td>0.91</td><td>0.30</td><td>1.55</td><td>20</td></tr>
 <tr><td>C1</td><td>full</td><td>11.68</td><td>11.31</td><td>12.14</td><td>10</td></tr>
@@ -204,6 +213,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Entry</th><th>Description</th><th>Factor</th><th>Experimental</th><th>Overall pass</th></tr></thead>
 <tbody>
+<tr><td>base</td><td>C3 baseline: hybrid KEM + dual signature + SHA-256 KDF + AES-256-GCM</td><td>baseline</td><td>false</td><td>pass</td></tr>
 <tr><td>k-512</td><td>KEM swap: standalone ML-KEM-512 (replaces full hybrid)</td><td>kem</td><td>false</td><td>pass</td></tr>
 <tr><td>k-768</td><td>KEM swap: standalone ML-KEM-768 (replaces full hybrid)</td><td>kem</td><td>false</td><td>pass</td></tr>
 <tr><td>k-1024</td><td>KEM swap: standalone ML-KEM-1024 (replaces full hybrid)</td><td>kem</td><td>false</td><td>pass</td></tr>
@@ -226,6 +236,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Profile</th><th>Speed (km/h)</th><th>Contact window (s)</th><th>HS p95 (s)</th><th>Window / HS p95</th><th>HS success rate</th></tr></thead>
 <tbody>
+<tr><td>delay50</td><td>50</td><td>14.40</td><td>0.2118</td><td>68.0</td><td>100.0%</td></tr>
 <tr><td>delay50</td><td>100</td><td>7.20</td><td>0.2118</td><td>34.0</td><td>100.0%</td></tr>
 <tr><td>delay50</td><td>150</td><td>4.80</td><td>0.2118</td><td>22.7</td><td>100.0%</td></tr>
 <tr><td>delay50</td><td>200</td><td>3.60</td><td>0.2118</td><td>17.0</td><td>100.0%</td></tr>
@@ -240,6 +251,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Scenario</th><th>DLC</th><th>Bits/frame</th><th>Rate (Hz)</th><th>Bit rate (kbps)</th><th>Occupancy (%)</th></tr></thead>
 <tbody>
+<tr><td>baseline</td><td>8</td><td>135</td><td>100.0</td><td>500.0</td><td>2.7</td></tr>
 <tr><td>protected_record_hypothetical</td><td>8</td><td>675</td><td>100.0</td><td>500.0</td><td>13.5</td></tr>
 </tbody>
 </table></div>
@@ -248,6 +260,7 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <div style="overflow-x:auto"><table>
 <thead><tr><th>Suite</th><th>Scheme</th><th>Sig bytes</th><th>Bytes/beacon</th><th>Bytes/s per sender</th><th>Verify load (ms/s)</th></tr></thead>
 <tbody>
+<tr><td>classical</td><td>ECDSA-P256</td><td>64</td><td>264</td><td>2640.0</td><td>4.52</td></tr>
 <tr><td>pqc</td><td>ML-DSA-65</td><td>3309</td><td>3509</td><td>35090.0</td><td>3.84</td></tr>
 <tr><td>hybrid</td><td>ECDSA-P256 + ML-DSA-65 (dual)</td><td>3373</td><td>3573</td><td>35730.0</td><td>8.47</td></tr>
 </tbody>
@@ -257,53 +270,28 @@ figcaption { font-size: 0.85rem; color: var(--fg-muted); margin-top: 0.5rem;
 <h2 id="13-limitations">§13 Limitations</h2>
 <p>The following six limitations are verbatim from the project specification (CLAUDE.md §1):</p>
 <ol>
-<li>The legacy CAN side stays unauthenticated. The gateway protects only the</li>
-</ol>
-<p>gateway↔peer link. A forged frame on the CAN bus is forwarded (protected) by the gateway.</p>
-<ol>
-<li>Results are <strong>relative</strong> comparisons between configurations on a laptop/desktop,</li>
-</ol>
-<p>not real-vehicle timings.</p>
-<ol>
-<li>The handshake is a <strong>custom protocol, not formally verified</strong>. It follows TLS 1.3-style</li>
-</ol>
-<p>patterns but is not TLS.</p>
-<ol>
-<li>Agility covers only algorithms that fit the four interfaces in §4. No claim about future</li>
-</ol>
-<p>algorithms.</p>
-<ol>
-<li>FN-DSA and HQC are included only if the installed library exposes them, and are labelled</li>
-</ol>
-<p>experimental.</p>
-<ol>
+<li>The legacy CAN side stays unauthenticated. The gateway protects only the gateway↔peer link. A forged frame on the CAN bus is forwarded (protected) by the gateway.</li>
+<li>Results are <strong>relative</strong> comparisons between configurations on a laptop/desktop, not real-vehicle timings.</li>
+<li>The handshake is a <strong>custom protocol, not formally verified</strong>. It follows TLS 1.3-style patterns but is not TLS.</li>
+<li>Agility covers only algorithms that fit the four interfaces in §4. No claim about future algorithms.</li>
+<li>FN-DSA and HQC are included only if the installed library exposes them, and are labelled experimental.</li>
 <li>Link emulation is not a wireless channel model.</li>
 </ol>
 <p>Additional limitations:</p>
-<ol>
-<li>All results were obtained on Apple arm64 (M-series); timings may differ significantly</li>
-</ol>
-<p>on x86-64 or embedded hardware.</p>
-<ol>
+<ol start="7">
+<li>All results were obtained on Apple arm64 (M-series); timings may differ significantly on x86-64 or embedded hardware.</li>
 <li>Full-rekey timing includes an unresolved event-loop wait in the prototype.</li>
 <li>asyncio scheduling noise is included in end-to-end timings.</li>
 </ol>
 <hr>
 <h2 id="14-figures">§14 Figures</h2>
-<figure><img src="../results/figures/micro_keygen.png" alt="KEM and signature key-generation time by algorithm (median µs, log scale)." loading="lazy"></figure>
-<p><em>KEM and signature key-generation time by algorithm (median µs, log scale).</em></p>
-<figure><img src="../results/figures/micro_ops.png" alt="encaps/decaps/sign/verify median µs by algorithm (log scale)." loading="lazy"></figure>
-<p><em>encaps/decaps/sign/verify median µs by algorithm (log scale).</em></p>
-<figure><img src="../results/figures/micro_aead.png" alt="AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B)." loading="lazy"></figure>
-<p><em>AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B).</em></p>
-<figure><img src="../results/figures/latency_cdf.png" alt="Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms." loading="lazy"></figure>
-<p><em>Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms.</em></p>
-<figure><img src="../results/figures/handshake_bars.png" alt="Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms." loading="lazy"></figure>
-<p><em>Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms.</em></p>
-<figure><img src="../results/figures/e2e_overhead.png" alt="Per-layer overhead bytes per record for C0–C3 (stacked bar)." loading="lazy"></figure>
-<p><em>Per-layer overhead bytes per record for C0–C3 (stacked bar).</em></p>
-<figure><img src="../results/figures/contact_window_heat.png" alt="Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5)." loading="lazy"></figure>
-<p><em>Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5).</em></p>
+<figure><img src="../results/figures/micro_keygen.png" alt="KEM and signature key-generation time by algorithm (median µs, log scale)." loading="lazy"><figcaption>KEM and signature key-generation time by algorithm (median µs, log scale).</figcaption></figure>
+<figure><img src="../results/figures/micro_ops.png" alt="encaps/decaps/sign/verify median µs by algorithm (log scale)." loading="lazy"><figcaption>encaps/decaps/sign/verify median µs by algorithm (log scale).</figcaption></figure>
+<figure><img src="../results/figures/micro_aead.png" alt="AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B)." loading="lazy"><figcaption>AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B).</figcaption></figure>
+<figure><img src="../results/figures/latency_cdf.png" alt="Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms." loading="lazy"><figcaption>Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms.</figcaption></figure>
+<figure><img src="../results/figures/handshake_bars.png" alt="Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms." loading="lazy"><figcaption>Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms.</figcaption></figure>
+<figure><img src="../results/figures/e2e_overhead.png" alt="Per-layer overhead bytes per record for C0–C3 (stacked bar)." loading="lazy"><figcaption>Per-layer overhead bytes per record for C0–C3 (stacked bar).</figcaption></figure>
+<figure><img src="../results/figures/contact_window_heat.png" alt="Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5)." loading="lazy"><figcaption>Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5).</figcaption></figure>
 <hr>
 </div>
 </body>

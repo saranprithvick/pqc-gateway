@@ -706,7 +706,6 @@ def _section_figures() -> str:
         # Relative path from docs/ to results/figures/
         rel = f"../results/figures/{fname}"
         lines.append(f"![{caption}]({rel})\n")
-        lines.append(f"*{caption}*\n")
     lines.append("\n---\n")
     return "\n".join(lines)
 
@@ -800,6 +799,7 @@ def _md_to_html(md: str) -> str:
     table_rows: list[list[str]] = []
     bq_buf: list[str] = []
     para_buf: list[str] = []
+    li_buf: list[str] = []  # accumulates text across continuation lines for current <li>
 
     def flush_para() -> None:
         nonlocal para_buf
@@ -814,8 +814,15 @@ def _md_to_html(md: str) -> str:
             body.append("</ul>")
             in_ul = False
 
+    def flush_li() -> None:
+        nonlocal li_buf
+        if li_buf:
+            body.append(f"<li>{_inline(' '.join(li_buf).strip())}</li>")
+            li_buf = []
+
     def flush_ol() -> None:
         nonlocal in_ol
+        flush_li()
         if in_ol:
             body.append("</ol>")
             in_ol = False
@@ -828,9 +835,9 @@ def _md_to_html(md: str) -> str:
         # First row = header, second = separator (skip)
         hdr = table_rows[0]
         body.append("<thead><tr>" + "".join(f"<th>{_inline(c)}</th>" for c in hdr) + "</tr></thead>")
-        if len(table_rows) > 2:
+        if len(table_rows) > 1:
             body.append("<tbody>")
-            for row in table_rows[2:]:
+            for row in table_rows[1:]:
                 # Pad/trim to header length
                 while len(row) < len(hdr):
                     row.append("")
@@ -886,7 +893,8 @@ def _md_to_html(md: str) -> str:
             flush_all()
             alt = _escape(m.group(1))
             src = _escape(m.group(2))
-            body.append(f'<figure><img src="{src}" alt="{alt}" loading="lazy"></figure>')
+            cap = f"<figcaption>{alt}</figcaption>" if alt else ""
+            body.append(f'<figure><img src="{src}" alt="{alt}" loading="lazy">{cap}</figure>')
             continue
 
         # Headings
@@ -909,13 +917,23 @@ def _md_to_html(md: str) -> str:
             flush_bq()
 
         # Ordered list (1. / 2. …)
-        m = _re.match(r"^\d+\.\s+(.*)", line)
+        m = _re.match(r"^(\d+)\.\s+(.*)", line)
         if m:
             flush_para(); flush_ul(); flush_table(); flush_bq()
+            flush_li()  # close previous item before starting a new one
             if not in_ol:
-                body.append("<ol>")
+                start_n = int(m.group(1))
+                attr = f' start="{start_n}"' if start_n > 1 else ""
+                body.append(f"<ol{attr}>")
                 in_ol = True
-            body.append(f"<li>{_inline(m.group(1))}</li>")
+            li_buf.append(m.group(2))
+            continue
+        # Continuation of a list item: indented/plain text while building li_buf
+        elif in_ol and li_buf and stripped and not _is_table_row(line) \
+                and not _re.match(r"^#{1,3}\s", line) \
+                and not line.startswith(">") \
+                and not _re.match(r"^-\s", line):
+            li_buf.append(stripped)
             continue
         elif in_ol:
             flush_ol()
