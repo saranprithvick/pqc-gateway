@@ -1,6 +1,6 @@
 # PQC Gateway — Results Brief
 
-**Commit:** `5c9a197`  **Date:** 2026-11-20
+**Commit:** `5c9a197`  **Date:** 2026-11-21
 
 > ANALYTICAL ESTIMATES are labelled where they appear. All other numbers are measured
 > on the host machine listed in §2. Results are relative comparisons only;
@@ -9,10 +9,11 @@
 ---
 ## §1 Scope
 
-This project evaluates, in simulation, a gateway that lets a legacy vehicle communicate
-with a PQC-capable peer using a hybrid post-quantum handshake and symmetric session
-protection. V2V wireless, vehicle mobility, and broadcast safety messages are outside
-the evaluated scope.
+This project designs and evaluates, in simulation, a gateway that lets a legacy vehicle
+communicate with a PQC-capable peer using a hybrid post-quantum handshake and symmetric
+session protection. V2V is the target application scenario. Wireless behaviour, vehicle
+mobility and broadcast safety messages are outside the evaluated scope and listed as
+future work.
 
 ## §2 Setup
 
@@ -53,8 +54,8 @@ the evaluated scope.
 | T13 | n/a | fails ✓ | fails ✓ | fails ✓ |
 
 43 cells pass (✓); 0 fail (✗) — 0 failures expected.
-T1–T11 and T13 also confirmed for all 14 agility matrix entries
-(0/14 overall_pass = pass). T12 is not applicable to the
+T1–T11 and T13 also confirmed for all 13 agility matrix entries
+(13/13 overall_pass = pass). T12 is not applicable to the
 matrix — CAN bus injection is suite-independent and always forwarded (documented limitation).
 
 ---
@@ -76,7 +77,8 @@ matrix — CAN bus injection is suite-independent and always forwarded (document
 | C3 | bw6000 | 46.39 | 50.07 | 9340 | 5 | 5 | 100.0% |
 
 Wall time = gateway handshake() start → completion including retransmits.
-Under 5% loss, p95 spikes to hundreds of ms due to 400 ms retransmit timeout.
+Under 5% loss, p95 spikes to hundreds of ms due to 200 ms retransmit timeout with
+exponential backoff (200/400/800 ms, …).
 
 ---
 ## §6 Per-handshake Primitive Cost (synchronous lower bound)
@@ -146,19 +148,20 @@ ML-DSA-65 sign p95/p99 show high variance from rejection sampling.
 | C3 | 0.25 | 0.46 | 100.0% | 1000 |
 
 Latency = CAN ingest timestamp → peer delivery timestamp (out-of-band monotonic clock).
-C1–C3 overhead over C0 reflects AES-GCM encrypt + decrypt + link framing.
+C1–C3 overhead over C0 is mainly Python record-layer processing (pack/unpack, state
+checks, asyncio scheduling); AES-GCM itself is ≈1 µs per operation (see §8).
 
 ---
 ## §10 Rekey Cost (ideal network)
 
-| Config | Type | Median (ms) | p95 (ms) | p99 (ms) | n |
+| Config | Type | Median (ms) | Min (ms) | Max (ms) | n |
 | --- | --- | --- | --- | --- | --- |
-| C1 | light | 0.70 |  |  | 20 |
-| C2 | light | 0.75 |  |  | 20 |
-| C3 | light | 0.91 |  |  | 20 |
-| C1 | full | 11.68 |  |  | 10 |
-| C2 | full | 11.52 |  |  | 10 |
-| C3 | full | 12.16 |  |  | 10 |
+| C1 | light | 0.70 | 0.31 | 1.22 | 20 |
+| C2 | light | 0.75 | 0.32 | 1.18 | 20 |
+| C3 | light | 0.91 | 0.30 | 1.55 | 20 |
+| C1 | full | 11.68 | 11.31 | 12.14 | 10 |
+| C2 | full | 11.52 | 11.09 | 11.74 | 10 |
+| C3 | full | 12.16 | 11.79 | 12.44 | 10 |
 
 **Light rekey (ratchet):** gateway sends REKEY\_REQ → peer replies REKEY\_ACK → both switch
 epoch. Measured time covers one round-trip (gateway → peer → gateway).
@@ -171,22 +174,21 @@ epoch. Measured time covers one round-trip (gateway → peer → gateway).
 
 | Entry | Description | Factor | Experimental | Overall pass |
 | --- | --- | --- | --- | --- |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
-|  |  |  |  |  |
+| base | C3 baseline: hybrid KEM + dual signature + SHA-256 KDF + AES-256-GCM | baseline | false | pass |
+| k-512 | KEM swap: standalone ML-KEM-512 (replaces full hybrid) | kem | false | pass |
+| k-768 | KEM swap: standalone ML-KEM-768 (replaces full hybrid) | kem | false | pass |
+| k-1024 | KEM swap: standalone ML-KEM-1024 (replaces full hybrid) | kem | false | pass |
+| s-44 | SIG swap: standalone ML-DSA-44 (replaces full dual sig) | sig | false | pass |
+| s-87 | SIG swap: standalone ML-DSA-87 (replaces full dual sig) | sig | false | pass |
+| s-slh | SIG swap: standalone SLH-DSA-SHA2-128f (~17 KB sig, stress test) | sig | false | pass |
+| s-ecdsa | SIG swap: standalone ECDSA-P256 only (classical regression check) | sig | false | pass |
+| d-384 | KDF swap: HKDF-SHA-384 | kdf | false | pass |
+| a-128 | AEAD swap: AES-128-GCM | aead | false | pass |
+| a-cha | AEAD swap: ChaCha20-Poly1305 | aead | false | pass |
+| x-hqc3 | Experimental KEM: HQC-3 (level 3, pre-standardisation) | kem | true | pass |
+| x-falcon512 | Experimental SIG: Falcon-512 (pre-standard, no NIST level-3 variant) | sig | true | pass |
 
-0/14 entries overall\_pass = pass; 0 mechanism\_absent (experimental,
+13/13 entries overall\_pass = pass; 0 mechanism\_absent (experimental,
 skipped). T1–T11 and T13 checked per entry; T12 not applicable to the matrix.
 
 ---
@@ -209,6 +211,7 @@ skipped). T1–T11 and T13 checked per entry; T12 not applicable to the matrix.
 
 Window/HS ratio > 1 means the handshake completes before the contact window closes.
 Under 5% loss the ratio can drop below 10 at high relative speeds (retransmit pressure).
+At 200 km/h (relative) under 5% loss, the C3 handshake p99 is 3041.07 ms and the contact window is 3.60 s (illustrative). The worst 1% of handshakes use most of a short contact window.
 
 ### §12b CAN Bus Occupancy
 
@@ -219,9 +222,10 @@ Under 5% loss the ratio can drop below 10 at high relative speeds (retransmit pr
 
 Hypothetical: in this design protected records travel only on the gateway↔peer link,
 never on the CAN bus; the `protected_record_hypothetical` row estimates the cost *if*
-they were carried on CAN. Segmentation: 8-byte payload chunks on CAN 2.0 (DLC ≤ 8),
-padded DLC on CAN FD. Numbers use a 500 kbps bit rate and worst-case bit-stuffing
-(Davis et al. 2007).
+they were carried on CAN. Assumption: one protected record = 8 B CAN data +
+16 B record header + 16 B AEAD tag = 40 B → 5 CAN 2.0 frames at DLC 8.
+Segmentation uses 8-byte payload chunks on CAN 2.0 (DLC ≤ 8), padded DLC on CAN FD.
+Numbers use a 500 kbps bit rate and worst-case bit-stuffing (Davis et al. 2007).
 
 ### §12c Per-beacon Signature Overhead
 
@@ -255,10 +259,8 @@ Additional limitations:
 
 7. All results were obtained on Apple arm64 (M-series); timings may differ significantly
    on x86-64 or embedded hardware.
-8. Full rekey median timing includes an unresolved asyncio event-loop wait
-   (request\_full\_rekey\_with\_event() scheduling jitter); the value is an upper bound.
-9. Latency measurements use `time.perf_counter_ns` on the same machine; asyncio
-   scheduling noise is included in the "other\_ns" component.
+8. Full-rekey timing includes an unresolved event-loop wait in the prototype.
+9. asyncio scheduling noise is included in end-to-end timings.
 
 ---
 ## §14 Figures

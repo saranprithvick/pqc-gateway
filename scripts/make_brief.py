@@ -30,7 +30,7 @@ def _load_csv(path: Path) -> list[dict[str, str]]:
         print(f"  WARNING: {path.name} not found — section will be empty", file=sys.stderr)
         return []
     with open(path, newline="", encoding="utf-8") as fh:
-        lines = [ln for ln in fh if not ln.startswith("#")]
+        lines = [ln for ln in fh if not ln.startswith("#") and ln.strip()]
     return list(csv.DictReader(lines))
 
 
@@ -110,10 +110,11 @@ def _section_setup() -> str:
     return """\
 ## §1 Scope
 
-This project evaluates, in simulation, a gateway that lets a legacy vehicle communicate
-with a PQC-capable peer using a hybrid post-quantum handshake and symmetric session
-protection. V2V wireless, vehicle mobility, and broadcast safety messages are outside
-the evaluated scope.
+This project designs and evaluates, in simulation, a gateway that lets a legacy vehicle
+communicate with a PQC-capable peer using a hybrid post-quantum handshake and symmetric
+session protection. V2V is the target application scenario. Wireless behaviour, vehicle
+mobility and broadcast safety messages are outside the evaluated scope and listed as
+future work.
 
 ## §2 Setup
 
@@ -211,7 +212,8 @@ def _section_handshake() -> str:
 {table_md}
 
 Wall time = gateway handshake() start → completion including retransmits.
-Under 5% loss, p95 spikes to hundreds of ms due to 400 ms retransmit timeout.
+Under 5% loss, p95 spikes to hundreds of ms due to 200 ms retransmit timeout with
+exponential backoff (200/400/800 ms, …).
 
 ---
 """
@@ -400,7 +402,8 @@ def _section_latency() -> str:
 {table_md}
 
 Latency = CAN ingest timestamp → peer delivery timestamp (out-of-band monotonic clock).
-C1–C3 overhead over C0 reflects AES-GCM encrypt + decrypt + link framing.
+C1–C3 overhead over C0 is mainly Python record-layer processing (pack/unpack, state
+checks, asyncio scheduling); AES-GCM itself is ≈1 µs per operation (see §8).
 
 ---
 """
@@ -414,7 +417,8 @@ def _section_rekey() -> str:
     light_rows = [r for r in rows if r.get("type") == "light" and r.get("profile") == "ideal"]
     full_rows  = [r for r in rows if r.get("type") == "full"  and r.get("profile") == "ideal"]
 
-    headers = ["Config", "Type", "Median (ms)", "p95 (ms)", "p99 (ms)", "n"]
+    # rekey_cost.csv carries time_min_ns/time_max_ns but not p95/p99 (n < 50).
+    headers = ["Config", "Type", "Median (ms)", "Min (ms)", "Max (ms)", "n"]
 
     def _fmt_rows(src: list[dict], rtype: str) -> list[list[str]]:
         # Deduplicate by config — keep last row
@@ -428,8 +432,8 @@ def _section_rekey() -> str:
                 result.append([
                     cfg.upper(), rtype,
                     _ns_to_ms(r.get("time_median_ns", "")),
-                    _ns_to_ms(r.get("time_p95_ns", "")),
-                    _ns_to_ms(r.get("time_p99_ns", "")),
+                    _ns_to_ms(r.get("time_min_ns", "")),
+                    _ns_to_ms(r.get("time_max_ns", "")),
                     r.get("time_n", ""),
                 ])
         return result
@@ -512,6 +516,23 @@ def _section_analytical() -> str:
     cw_md = (_md_table(cw_headers, cw_table_rows) if cw_table_rows
              else "*No matching contact_window rows.*")
 
+    # Pull C3/loss5 p99 and the 200 km/h contact window from tables for the note.
+    hs_rows = _load_csv(TABLES / "handshake.csv")
+    _hs_by_key = {(r.get("config",""), r.get("profile","")): r for r in hs_rows}
+    c3_loss5_p99_ms = _ns_to_ms(_hs_by_key.get(("c3", "loss5"), {}).get("wall_p99_ns", ""))
+    cw_200_loss5 = next(
+        (r for r in cw_filtered if r.get("relative_speed_kmh") == "200" and r.get("profile") == "loss5"),
+        {},
+    )
+    cw_200_s = _fmt(cw_200_loss5.get("contact_window_s", ""), 2) if cw_200_loss5 else ""
+    p99_note = ""
+    if c3_loss5_p99_ms and cw_200_s:
+        p99_note = (
+            f"\nAt 200 km/h (relative) under 5% loss, the C3 handshake p99 is "
+            f"{c3_loss5_p99_ms} ms and the contact window is {cw_200_s} s (illustrative). "
+            f"The worst 1% of handshakes use most of a short contact window."
+        )
+
     # --- Bus time ---
     # Show plain CAN 2.0 baseline row and hypothetical protected-record row.
     bt_sel = [r for r in bt_rows
@@ -550,7 +571,7 @@ def _section_analytical() -> str:
 {cw_md}
 
 Window/HS ratio > 1 means the handshake completes before the contact window closes.
-Under 5% loss the ratio can drop below 10 at high relative speeds (retransmit pressure).
+Under 5% loss the ratio can drop below 10 at high relative speeds (retransmit pressure).{p99_note}
 
 ### §12b CAN Bus Occupancy
 
@@ -558,9 +579,10 @@ Under 5% loss the ratio can drop below 10 at high relative speeds (retransmit pr
 
 Hypothetical: in this design protected records travel only on the gateway↔peer link,
 never on the CAN bus; the `protected_record_hypothetical` row estimates the cost *if*
-they were carried on CAN. Segmentation: 8-byte payload chunks on CAN 2.0 (DLC ≤ 8),
-padded DLC on CAN FD. Numbers use a 500 kbps bit rate and worst-case bit-stuffing
-(Davis et al. 2007).
+they were carried on CAN. Assumption: one protected record = 8 B CAN data +
+16 B record header + 16 B AEAD tag = 40 B → 5 CAN 2.0 frames at DLC 8.
+Segmentation uses 8-byte payload chunks on CAN 2.0 (DLC ≤ 8), padded DLC on CAN FD.
+Numbers use a 500 kbps bit rate and worst-case bit-stuffing (Davis et al. 2007).
 
 ### §12c Per-beacon Signature Overhead
 
@@ -595,10 +617,8 @@ Additional limitations:
 
 7. All results were obtained on Apple arm64 (M-series); timings may differ significantly
    on x86-64 or embedded hardware.
-8. Full rekey median timing includes an unresolved asyncio event-loop wait
-   (request\_full\_rekey\_with\_event() scheduling jitter); the value is an upper bound.
-9. Latency measurements use `time.perf_counter_ns` on the same machine; asyncio
-   scheduling noise is included in the "other\_ns" component.
+8. Full-rekey timing includes an unresolved event-loop wait in the prototype.
+9. asyncio scheduling noise is included in end-to-end timings.
 
 ---
 """
