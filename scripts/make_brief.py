@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).parent.parent
 TABLES = REPO_ROOT / "results" / "tables"
 FIGS = REPO_ROOT / "results" / "figures"
 OUT = REPO_ROOT / "docs" / "RESULTS_BRIEF.md"
+OUT_HTML = REPO_ROOT / "docs" / "RESULTS_BRIEF.html"
 
 # ---------------------------------------------------------------------------
 # CSV helpers
@@ -708,6 +709,238 @@ def _section_figures() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Markdown → HTML converter (handles the specific subset used in this brief)
+# ---------------------------------------------------------------------------
+
+_HTML_CSS = """\
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --fg-muted: #555; --accent: #1a56db;
+  --border: #d1d5db; --th-bg: #f3f4f6; --tr-alt: #f9fafb;
+  --code-bg: #f1f5f9; --bq-border: #3b82f6; --bq-bg: #eff6ff;
+  --hr: #e5e7eb; --max-w: 900px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f172a; --fg: #e2e8f0; --fg-muted: #94a3b8; --accent: #60a5fa;
+    --border: #334155; --th-bg: #1e293b; --tr-alt: #172033;
+    --code-bg: #1e293b; --bq-border: #3b82f6; --bq-bg: #172033;
+    --hr: #334155;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f172a; --fg: #e2e8f0; --fg-muted: #94a3b8; --accent: #60a5fa;
+  --border: #334155; --th-bg: #1e293b; --tr-alt: #172033;
+  --code-bg: #1e293b; --bq-border: #3b82f6; --bq-bg: #172033;
+  --hr: #334155;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, sans-serif;
+  padding: 2rem 1rem; }
+.container { max-width: var(--max-w); margin: 0 auto; }
+h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.3rem;
+  border-bottom: 2px solid var(--border); }
+h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; color: var(--fg); }
+p { margin: 0.6rem 0; color: var(--fg); }
+a { color: var(--accent); }
+hr { border: none; border-top: 1px solid var(--hr); margin: 1.5rem 0; }
+code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px;
+  font-size: 0.88em; font-family: ui-monospace, monospace; color: var(--fg); }
+blockquote { border-left: 4px solid var(--bq-border); background: var(--bq-bg);
+  padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+blockquote p { margin: 0; }
+ul, ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+li { margin: 0.2rem 0; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.88rem;
+  overflow-x: auto; display: block; }
+th { background: var(--th-bg); font-weight: 600; text-align: left; }
+th, td { border: 1px solid var(--border); padding: 0.45rem 0.75rem;
+  white-space: nowrap; }
+tr:nth-child(even) td { background: var(--tr-alt); }
+.meta { color: var(--fg-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+"""
+
+
+def _md_to_html(md: str) -> str:
+    """Convert the brief's controlled Markdown subset to a full HTML page."""
+    import re as _re
+
+    def _escape(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _inline(s: str) -> str:
+        s = _escape(s)
+        # Unescape Markdown backslash sequences used in the brief (\_  \*)
+        s = s.replace(r"\_", "_").replace(r"\*", "*")
+        s = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+        s = _re.sub(r"\*([^*]+)\*", r"<em>\1</em>", s)
+        s = _re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+        return s
+
+    def _is_table_row(ln: str) -> bool:
+        s = ln.strip()
+        return s.startswith("|") and s.endswith("|") and s.count("|") >= 2
+
+    def _parse_cells(ln: str) -> list[str]:
+        return [c.strip() for c in ln.strip().strip("|").split("|")]
+
+    def _is_separator(cells: list[str]) -> bool:
+        return all(_re.match(r"^[\s\-:]+$", c) for c in cells if c)
+
+    body: list[str] = []
+    in_ul = in_ol = in_table = in_bq = False
+    table_rows: list[list[str]] = []
+    bq_buf: list[str] = []
+    para_buf: list[str] = []
+
+    def flush_para() -> None:
+        nonlocal para_buf
+        text = " ".join(para_buf).strip()
+        if text:
+            body.append(f"<p>{_inline(text)}</p>")
+        para_buf = []
+
+    def flush_ul() -> None:
+        nonlocal in_ul
+        if in_ul:
+            body.append("</ul>")
+            in_ul = False
+
+    def flush_ol() -> None:
+        nonlocal in_ol
+        if in_ol:
+            body.append("</ol>")
+            in_ol = False
+
+    def flush_table() -> None:
+        nonlocal in_table, table_rows
+        if not (in_table and table_rows):
+            return
+        body.append('<div style="overflow-x:auto"><table>')
+        # First row = header, second = separator (skip)
+        hdr = table_rows[0]
+        body.append("<thead><tr>" + "".join(f"<th>{_inline(c)}</th>" for c in hdr) + "</tr></thead>")
+        if len(table_rows) > 2:
+            body.append("<tbody>")
+            for row in table_rows[2:]:
+                # Pad/trim to header length
+                while len(row) < len(hdr):
+                    row.append("")
+                body.append("<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in row[:len(hdr)]) + "</tr>")
+            body.append("</tbody>")
+        body.append("</table></div>")
+        table_rows = []
+        in_table = False
+
+    def flush_bq() -> None:
+        nonlocal in_bq, bq_buf
+        if in_bq and bq_buf:
+            inner = " ".join(bq_buf)
+            body.append(f"<blockquote><p>{_inline(inner)}</p></blockquote>")
+            bq_buf = []
+        in_bq = False
+
+    def flush_all() -> None:
+        flush_para(); flush_ul(); flush_ol(); flush_table(); flush_bq()
+
+    for line in md.split("\n"):
+        stripped = line.strip()
+
+        # Blank line — flush current context
+        if not stripped:
+            flush_para()
+            if not (in_table or in_bq or in_ul or in_ol):
+                pass  # paragraph gap already handled
+            else:
+                flush_all()
+            continue
+
+        # Horizontal rule
+        if stripped == "---":
+            flush_all()
+            body.append("<hr>")
+            continue
+
+        # Table row
+        if _is_table_row(line):
+            flush_para(); flush_ul(); flush_ol(); flush_bq()
+            cells = _parse_cells(line)
+            if not _is_separator(cells):
+                table_rows.append(cells)
+            in_table = True
+            continue
+        elif in_table:
+            flush_table()
+
+        # Headings
+        m = _re.match(r"^(#{1,3})\s+(.*)", line)
+        if m:
+            flush_all()
+            level = len(m.group(1))
+            text = m.group(2)
+            hid = _re.sub(r"[^\wÀ-ɏ]+", "-", text.lower()).strip("-")
+            body.append(f"<h{level} id=\"{hid}\">{_inline(text)}</h{level}>")
+            continue
+
+        # Blockquote
+        if line.startswith(">"):
+            flush_para(); flush_ul(); flush_ol(); flush_table()
+            bq_buf.append(line.lstrip("> "))
+            in_bq = True
+            continue
+        elif in_bq:
+            flush_bq()
+
+        # Ordered list (1. / 2. …)
+        m = _re.match(r"^\d+\.\s+(.*)", line)
+        if m:
+            flush_para(); flush_ul(); flush_table(); flush_bq()
+            if not in_ol:
+                body.append("<ol>")
+                in_ol = True
+            body.append(f"<li>{_inline(m.group(1))}</li>")
+            continue
+        elif in_ol:
+            flush_ol()
+
+        # Unordered list
+        m = _re.match(r"^-\s+(.*)", line)
+        if m:
+            flush_para(); flush_ol(); flush_table(); flush_bq()
+            if not in_ul:
+                body.append("<ul>")
+                in_ul = True
+            body.append(f"<li>{_inline(m.group(1))}</li>")
+            continue
+        elif in_ul:
+            flush_ul()
+
+        # Regular text — accumulate into paragraph
+        para_buf.append(line)
+
+    flush_all()
+
+    body_html = "\n".join(body)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PQC Gateway — Results Brief</title>
+<style>
+{_HTML_CSS}
+</style>
+</head>
+<body>
+<div class="container">
+{body_html}
+</div>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -733,9 +966,14 @@ def main() -> None:
         _section_figures(),
     ]
 
+    md_text = "".join(sections)
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text("".join(sections), encoding="utf-8")
+    OUT.write_text(md_text, encoding="utf-8")
     print(f"Written to {OUT}")
+
+    OUT_HTML.write_text(_md_to_html(md_text), encoding="utf-8")
+    print(f"Written to {OUT_HTML}")
 
 
 if __name__ == "__main__":

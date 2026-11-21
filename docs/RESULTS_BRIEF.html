@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PQC Gateway — Results Brief</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --fg-muted: #555; --accent: #1a56db;
+  --border: #d1d5db; --th-bg: #f3f4f6; --tr-alt: #f9fafb;
+  --code-bg: #f1f5f9; --bq-border: #3b82f6; --bq-bg: #eff6ff;
+  --hr: #e5e7eb; --max-w: 900px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f172a; --fg: #e2e8f0; --fg-muted: #94a3b8; --accent: #60a5fa;
+    --border: #334155; --th-bg: #1e293b; --tr-alt: #172033;
+    --code-bg: #1e293b; --bq-border: #3b82f6; --bq-bg: #172033;
+    --hr: #334155;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f172a; --fg: #e2e8f0; --fg-muted: #94a3b8; --accent: #60a5fa;
+  --border: #334155; --th-bg: #1e293b; --tr-alt: #172033;
+  --code-bg: #1e293b; --bq-border: #3b82f6; --bq-bg: #172033;
+  --hr: #334155;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, sans-serif;
+  padding: 2rem 1rem; }
+.container { max-width: var(--max-w); margin: 0 auto; }
+h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.3rem;
+  border-bottom: 2px solid var(--border); }
+h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; color: var(--fg); }
+p { margin: 0.6rem 0; color: var(--fg); }
+a { color: var(--accent); }
+hr { border: none; border-top: 1px solid var(--hr); margin: 1.5rem 0; }
+code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px;
+  font-size: 0.88em; font-family: ui-monospace, monospace; color: var(--fg); }
+blockquote { border-left: 4px solid var(--bq-border); background: var(--bq-bg);
+  padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+blockquote p { margin: 0; }
+ul, ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+li { margin: 0.2rem 0; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.88rem;
+  overflow-x: auto; display: block; }
+th { background: var(--th-bg); font-weight: 600; text-align: left; }
+th, td { border: 1px solid var(--border); padding: 0.45rem 0.75rem;
+  white-space: nowrap; }
+tr:nth-child(even) td { background: var(--tr-alt); }
+.meta { color: var(--fg-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+
+</style>
+</head>
+<body>
+<div class="container">
+<h1 id="pqc-gateway-results-brief">PQC Gateway — Results Brief</h1>
+<p><strong>Commit:</strong> <code>5c9a197</code>  <strong>Date:</strong> 2026-11-21</p>
+<blockquote><p>ANALYTICAL ESTIMATES are labelled where they appear. All other numbers are measured on the host machine listed in §2. Results are relative comparisons only; see §Limitations for scope.</p></blockquote>
+<hr>
+<h2 id="1-scope">§1 Scope</h2>
+<p>This project designs and evaluates, in simulation, a gateway that lets a legacy vehicle communicate with a PQC-capable peer using a hybrid post-quantum handshake and symmetric session protection. V2V is the target application scenario. Wireless behaviour, vehicle mobility and broadcast safety messages are outside the evaluated scope and listed as future work.</p>
+<h2 id="2-setup">§2 Setup</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Item</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Python</td><td>3.13.2</td></tr>
+<tr><td>liboqs</td><td>0.16.0</td></tr>
+<tr><td>liboqs-python</td><td>0.16.0.2</td></tr>
+<tr><td>cryptography</td><td>50.0.2</td></tr>
+</tbody>
+</table></div>
+<h2 id="3-configurations">§3 Configurations</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>ID</th><th>Name</th><th>KEM</th><th>Signature</th><th>KDF</th><th>AEAD</th></tr></thead>
+<tbody>
+<tr><td>C1</td><td>Classical</td><td>X25519</td><td>ECDSA-P256</td><td>HKDF-SHA-256</td><td>AES-256-GCM</td></tr>
+<tr><td>C2</td><td>PQC-only</td><td>ML-KEM-768</td><td>ML-DSA-65</td><td>HKDF-SHA-256</td><td>AES-256-GCM</td></tr>
+<tr><td>C3</td><td>Hybrid</td><td>X25519 + ML-KEM-768</td><td>ECDSA-P256 + ML-DSA-65 (dual)</td><td>HKDF-SHA-256</td><td>AES-256-GCM</td></tr>
+</tbody>
+</table></div>
+<hr>
+<h2 id="4-security-t1-t13-×-c0-c3">§4 Security (T1–T13 × C0–C3)</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Test</th><th>C0</th><th>C1</th><th>C2</th><th>C3</th></tr></thead>
+<tbody>
+<tr><td>T2</td><td>accepted ✓</td><td>rejected ✓</td><td>rejected ✓</td><td>rejected ✓</td></tr>
+<tr><td>T3</td><td>accepted ✓</td><td>rejected ✓</td><td>rejected ✓</td><td>rejected ✓</td></tr>
+<tr><td>T4</td><td>n/a</td><td>aborts ✓</td><td>aborts ✓</td><td>aborts ✓</td></tr>
+<tr><td>T5</td><td>n/a</td><td>fails ✓</td><td>fails ✓</td><td>fails ✓</td></tr>
+<tr><td>T6</td><td>n/a</td><td>aborts ✓</td><td>aborts ✓</td><td>aborts ✓</td></tr>
+<tr><td>T7</td><td>n/a</td><td>in-window once / dup rejected ✓</td><td>in-window once / dup rejected ✓</td><td>in-window once / dup rejected ✓</td></tr>
+<tr><td>T8</td><td>n/a</td><td>survives ✓</td><td>survives ✓</td><td>survives ✓</td></tr>
+<tr><td>T9</td><td>n/a</td><td>no-reuse ✓</td><td>no-reuse ✓</td><td>no-reuse ✓</td></tr>
+<tr><td>T10</td><td>n/a</td><td>rekeys ✓</td><td>rekeys ✓</td><td>rekeys ✓</td></tr>
+<tr><td>T11</td><td>n/a</td><td>rejected ✓</td><td>rejected ✓</td><td>rejected ✓</td></tr>
+<tr><td>T12</td><td>forwarded ✓</td><td>forwarded ✓</td><td>forwarded ✓</td><td>forwarded ✓</td></tr>
+<tr><td>T13</td><td>n/a</td><td>fails ✓</td><td>fails ✓</td><td>fails ✓</td></tr>
+</tbody>
+</table></div>
+<p>43 cells pass (✓); 0 fail (✗) — 0 failures expected. T1–T11 and T13 also confirmed for all 13 agility matrix entries (13/13 overall_pass = pass). T12 is not applicable to the matrix — CAN bus injection is suite-independent and always forwarded (documented limitation).</p>
+<hr>
+<h2 id="5-handshake">§5 Handshake</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Config</th><th>Profile</th><th>Wall median (ms)</th><th>Wall p95 (ms)</th><th>HS bytes (wire)</th><th>Frags I→R</th><th>Frags R→I</th><th>Success rate</th></tr></thead>
+<tbody>
+<tr><td>C1</td><td>delay50</td><td>209.97</td><td>212.63</td><td>386</td><td>2</td><td>2</td><td>100.0%</td></tr>
+<tr><td>C1</td><td>loss5</td><td>26.37</td><td>229.71</td><td>386</td><td>2</td><td>2</td><td>100.0%</td></tr>
+<tr><td>C1</td><td>bw6000</td><td>29.72</td><td>33.50</td><td>386</td><td>2</td><td>2</td><td>100.0%</td></tr>
+<tr><td>C2</td><td>ideal</td><td>2.41</td><td>3.61</td><td>9124</td><td>5</td><td>4</td><td>100.0%</td></tr>
+<tr><td>C2</td><td>delay50</td><td>209.82</td><td>211.69</td><td>9124</td><td>5</td><td>4</td><td>100.0%</td></tr>
+<tr><td>C2</td><td>loss5</td><td>28.67</td><td>639.09</td><td>9124</td><td>5</td><td>4</td><td>100.0%</td></tr>
+<tr><td>C2</td><td>bw6000</td><td>44.80</td><td>50.99</td><td>9124</td><td>5</td><td>4</td><td>100.0%</td></tr>
+<tr><td>C3</td><td>ideal</td><td>3.43</td><td>5.08</td><td>9340</td><td>5</td><td>5</td><td>100.0%</td></tr>
+<tr><td>C3</td><td>delay50</td><td>210.36</td><td>211.76</td><td>9340</td><td>5</td><td>5</td><td>100.0%</td></tr>
+<tr><td>C3</td><td>loss5</td><td>32.39</td><td>844.30</td><td>9340</td><td>5</td><td>5</td><td>100.0%</td></tr>
+<tr><td>C3</td><td>bw6000</td><td>46.39</td><td>50.07</td><td>9340</td><td>5</td><td>5</td><td>100.0%</td></tr>
+</tbody>
+</table></div>
+<p>Wall time = gateway handshake() start → completion including retransmits. Under 5% loss, p95 spikes to hundreds of ms due to 200 ms retransmit timeout with exponential backoff (200/400/800 ms, …).</p>
+<hr>
+<h2 id="6-per-handshake-primitive-cost-synchronous-lower-bound">§6 Per-handshake Primitive Cost (synchronous lower bound)</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Config</th><th>Suite</th><th>Median (ms)</th><th>p95 (ms)</th><th>p99 (ms)</th><th>n</th></tr></thead>
+<tbody>
+<tr><td>C2</td><td>pqc</td><td>0.34</td><td>0.47</td><td>0.58</td><td>1000</td></tr>
+<tr><td>C3</td><td>hybrid</td><td>0.66</td><td>0.79</td><td>0.88</td><td>1000</td></tr>
+</tbody>
+</table></div>
+<p>Measured in-process (no asyncio overhead). C3 ≈ C1 + C2 as expected for hybrid.</p>
+<hr>
+<h2 id="7-per-record-overhead-wire-bytes">§7 Per-record Overhead (wire bytes)</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Config</th><th>CAN framing (B)</th><th>Frag header (B)</th><th>Prefix (B)</th><th>Record header (B)</th><th>AEAD tag (B)</th><th>Total overhead (B)</th><th>HS amortised/100 rec</th><th>HS amortised/1k rec</th><th>HS amortised/10k rec</th></tr></thead>
+<tbody>
+<tr><td>C1</td><td>5</td><td>8</td><td>1</td><td>16</td><td>16</td><td>46</td><td>3.86</td><td>0.39</td><td>0.04</td></tr>
+<tr><td>C2</td><td>5</td><td>8</td><td>1</td><td>16</td><td>16</td><td>46</td><td>91.24</td><td>9.12</td><td>0.91</td></tr>
+<tr><td>C3</td><td>5</td><td>8</td><td>1</td><td>16</td><td>16</td><td>46</td><td>93.4</td><td>9.34</td><td>0.93</td></tr>
+</tbody>
+</table></div>
+<p>C0 carries only CAN framing + fragment header (no crypto). C1–C3 add a 1-byte message-type prefix, 16-byte record header, and 16-byte AEAD tag per record. Amortised HS columns are handshake wire bytes divided by session length.</p>
+<hr>
+<h2 id="8-micro-benchmarks-1-000-iterations-50-warm-up-discarded">§8 Micro-benchmarks (1 000 iterations, 50 warm-up discarded)</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Algorithm</th><th>Operation</th><th>Payload (B)</th><th>Median (µs)</th><th>p95 (µs)</th><th>p99 (µs)</th><th>n</th></tr></thead>
+<tbody>
+<tr><td>X25519 (KEM wrapper)</td><td>kem_encaps</td><td>—</td><td>44.6</td><td>45.8</td><td>52.1</td><td>1000</td></tr>
+<tr><td>X25519 (KEM wrapper)</td><td>kem_decaps</td><td>—</td><td>43.1</td><td>43.8</td><td>49.4</td><td>1000</td></tr>
+<tr><td>ECDSA-P256</td><td>sig_keygen</td><td>—</td><td>15.4</td><td>17.8</td><td>22.5</td><td>1000</td></tr>
+<tr><td>ECDSA-P256</td><td>sig_sign</td><td>64</td><td>30.7</td><td>35.0</td><td>41.1</td><td>1000</td></tr>
+<tr><td>ECDSA-P256</td><td>sig_verify</td><td>64</td><td>45.2</td><td>45.5</td><td>50.9</td><td>1000</td></tr>
+<tr><td>AES-256-GCM</td><td>aead_encrypt</td><td>8</td><td>1.0</td><td>1.0</td><td>1.1</td><td>1000</td></tr>
+<tr><td>AES-256-GCM</td><td>aead_decrypt</td><td>8</td><td>1.0</td><td>1.1</td><td>1.1</td><td>1000</td></tr>
+<tr><td>AES-256-GCM</td><td>aead_encrypt</td><td>64</td><td>1.0</td><td>1.1</td><td>1.1</td><td>1000</td></tr>
+<tr><td>AES-256-GCM</td><td>aead_decrypt</td><td>64</td><td>1.0</td><td>1.0</td><td>1.1</td><td>1000</td></tr>
+<tr><td>AES-256-GCM</td><td>aead_encrypt</td><td>256</td><td>1.0</td><td>1.1</td><td>1.1</td><td>1000</td></tr>
+<tr><td>AES-256-GCM</td><td>aead_decrypt</td><td>256</td><td>1.0</td><td>1.1</td><td>1.1</td><td>1000</td></tr>
+<tr><td>AES-256-GCM</td><td>aead_encrypt</td><td>1024</td><td>1.1</td><td>1.2</td><td>1.2</td><td>1000</td></tr>
+<tr><td>AES-256-GCM</td><td>aead_decrypt</td><td>1024</td><td>1.2</td><td>1.3</td><td>1.5</td><td>1000</td></tr>
+<tr><td>ML-KEM-768</td><td>kem_keygen</td><td>—</td><td>14.2</td><td>18.4</td><td>60.0</td><td>1000</td></tr>
+<tr><td>ML-KEM-768</td><td>kem_encaps</td><td>—</td><td>14.7</td><td>16.9</td><td>28.8</td><td>1000</td></tr>
+<tr><td>ML-KEM-768</td><td>kem_decaps</td><td>—</td><td>15.3</td><td>19.3</td><td>19.7</td><td>1000</td></tr>
+<tr><td>ML-DSA-65</td><td>sig_keygen</td><td>—</td><td>40.1</td><td>46.2</td><td>52.3</td><td>1000</td></tr>
+<tr><td>ML-DSA-65</td><td>sig_sign</td><td>64</td><td>75.6</td><td>177.3</td><td>255.7</td><td>1000</td></tr>
+<tr><td>ML-DSA-65</td><td>sig_verify</td><td>64</td><td>38.4</td><td>38.7</td><td>40.0</td><td>1000</td></tr>
+<tr><td>SLH-DSA-SHA2-128f</td><td>sig_keygen</td><td>—</td><td>576.3</td><td>587.7</td><td>594.7</td><td>1000</td></tr>
+<tr><td>SLH-DSA-SHA2-128f</td><td>sig_sign</td><td>64</td><td>13463.5</td><td>13925.7</td><td>16480.7</td><td>1000</td></tr>
+<tr><td>SLH-DSA-SHA2-128f</td><td>sig_verify</td><td>64</td><td>826.7</td><td>843.7</td><td>876.9</td><td>1000</td></tr>
+</tbody>
+</table></div>
+<p>SLH-DSA-SHA2-128f sign is slow due to hash-based tree construction (~13 ms median). ML-DSA-65 sign p95/p99 show high variance from rejection sampling.</p>
+<hr>
+<h2 id="9-steady-state-latency-ideal-network-100-hz-1-000-frames">§9 Steady-state Latency (ideal network, 100 Hz, 1 000 frames)</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Config</th><th>Latency median (ms)</th><th>Latency p95 (ms)</th><th>Delivery ratio</th><th>n</th></tr></thead>
+<tbody>
+<tr><td>C1</td><td>0.22</td><td>0.37</td><td>100.0%</td><td>1000</td></tr>
+<tr><td>C2</td><td>0.23</td><td>0.35</td><td>100.0%</td><td>1000</td></tr>
+<tr><td>C3</td><td>0.25</td><td>0.46</td><td>100.0%</td><td>1000</td></tr>
+</tbody>
+</table></div>
+<p>Latency = CAN ingest timestamp → peer delivery timestamp (out-of-band monotonic clock). C1–C3 overhead over C0 is mainly Python record-layer processing (pack/unpack, state checks, asyncio scheduling); AES-GCM itself is ≈1 µs per operation (see §8).</p>
+<hr>
+<h2 id="10-rekey-cost-ideal-network">§10 Rekey Cost (ideal network)</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Config</th><th>Type</th><th>Median (ms)</th><th>Min (ms)</th><th>Max (ms)</th><th>n</th></tr></thead>
+<tbody>
+<tr><td>C2</td><td>light</td><td>0.75</td><td>0.32</td><td>1.18</td><td>20</td></tr>
+<tr><td>C3</td><td>light</td><td>0.91</td><td>0.30</td><td>1.55</td><td>20</td></tr>
+<tr><td>C1</td><td>full</td><td>11.68</td><td>11.31</td><td>12.14</td><td>10</td></tr>
+<tr><td>C2</td><td>full</td><td>11.52</td><td>11.09</td><td>11.74</td><td>10</td></tr>
+<tr><td>C3</td><td>full</td><td>12.16</td><td>11.79</td><td>12.44</td><td>10</td></tr>
+</tbody>
+</table></div>
+<p><strong>Light rekey (ratchet):</strong> gateway sends REKEY_REQ → peer replies REKEY_ACK → both switch epoch. Measured time covers one round-trip (gateway → peer → gateway). <strong>Full rekey:</strong> new handshake runs alongside live traffic; measured time spans <code>request_full_rekey()</code> to new-session establishment. <em>Full rekey median includes an unresolved asyncio event-loop wait (see §Limitations).</em></p>
+<hr>
+<h2 id="11-agility-matrix">§11 Agility Matrix</h2>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Entry</th><th>Description</th><th>Factor</th><th>Experimental</th><th>Overall pass</th></tr></thead>
+<tbody>
+<tr><td>k-512</td><td>KEM swap: standalone ML-KEM-512 (replaces full hybrid)</td><td>kem</td><td>false</td><td>pass</td></tr>
+<tr><td>k-768</td><td>KEM swap: standalone ML-KEM-768 (replaces full hybrid)</td><td>kem</td><td>false</td><td>pass</td></tr>
+<tr><td>k-1024</td><td>KEM swap: standalone ML-KEM-1024 (replaces full hybrid)</td><td>kem</td><td>false</td><td>pass</td></tr>
+<tr><td>s-44</td><td>SIG swap: standalone ML-DSA-44 (replaces full dual sig)</td><td>sig</td><td>false</td><td>pass</td></tr>
+<tr><td>s-87</td><td>SIG swap: standalone ML-DSA-87 (replaces full dual sig)</td><td>sig</td><td>false</td><td>pass</td></tr>
+<tr><td>s-slh</td><td>SIG swap: standalone SLH-DSA-SHA2-128f (~17 KB sig, stress test)</td><td>sig</td><td>false</td><td>pass</td></tr>
+<tr><td>s-ecdsa</td><td>SIG swap: standalone ECDSA-P256 only (classical regression check)</td><td>sig</td><td>false</td><td>pass</td></tr>
+<tr><td>d-384</td><td>KDF swap: HKDF-SHA-384</td><td>kdf</td><td>false</td><td>pass</td></tr>
+<tr><td>a-128</td><td>AEAD swap: AES-128-GCM</td><td>aead</td><td>false</td><td>pass</td></tr>
+<tr><td>a-cha</td><td>AEAD swap: ChaCha20-Poly1305</td><td>aead</td><td>false</td><td>pass</td></tr>
+<tr><td>x-hqc3</td><td>Experimental KEM: HQC-3 (level 3, pre-standardisation)</td><td>kem</td><td>true</td><td>pass</td></tr>
+<tr><td>x-falcon512</td><td>Experimental SIG: Falcon-512 (pre-standard, no NIST level-3 variant)</td><td>sig</td><td>true</td><td>pass</td></tr>
+</tbody>
+</table></div>
+<p>13/13 entries overall_pass = pass; 0 mechanism_absent (experimental, skipped). T1–T11 and T13 checked per entry; T12 not applicable to the matrix.</p>
+<hr>
+<h2 id="12-analytical-estimates">§12 Analytical Estimates</h2>
+<blockquote><p><strong>ANALYTICAL ESTIMATE — NOT A SIMULATION.</strong> None of these values are measured.</p></blockquote>
+<h3 id="12a-contact-window-vs-handshake-time-c3-range-100-m">§12a Contact Window vs Handshake Time (C3, range = 100 m)</h3>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Profile</th><th>Speed (km/h)</th><th>Contact window (s)</th><th>HS p95 (s)</th><th>Window / HS p95</th><th>HS success rate</th></tr></thead>
+<tbody>
+<tr><td>delay50</td><td>100</td><td>7.20</td><td>0.2118</td><td>34.0</td><td>100.0%</td></tr>
+<tr><td>delay50</td><td>150</td><td>4.80</td><td>0.2118</td><td>22.7</td><td>100.0%</td></tr>
+<tr><td>delay50</td><td>200</td><td>3.60</td><td>0.2118</td><td>17.0</td><td>100.0%</td></tr>
+<tr><td>loss5</td><td>50</td><td>14.40</td><td>0.8443</td><td>17.1</td><td>100.0%</td></tr>
+<tr><td>loss5</td><td>100</td><td>7.20</td><td>0.8443</td><td>8.5</td><td>100.0%</td></tr>
+<tr><td>loss5</td><td>150</td><td>4.80</td><td>0.8443</td><td>5.7</td><td>100.0%</td></tr>
+<tr><td>loss5</td><td>200</td><td>3.60</td><td>0.8443</td><td>4.3</td><td>100.0%</td></tr>
+</tbody>
+</table></div>
+<p>Window/HS ratio &gt; 1 means the handshake completes before the contact window closes. Under 5% loss the ratio can drop below 10 at high relative speeds (retransmit pressure). At 200 km/h (relative) under 5% loss, the C3 handshake p99 is 3041.07 ms and the contact window is 3.60 s (illustrative). The worst 1% of handshakes use most of a short contact window.</p>
+<h3 id="12b-can-bus-occupancy">§12b CAN Bus Occupancy</h3>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Scenario</th><th>DLC</th><th>Bits/frame</th><th>Rate (Hz)</th><th>Bit rate (kbps)</th><th>Occupancy (%)</th></tr></thead>
+<tbody>
+<tr><td>protected_record_hypothetical</td><td>8</td><td>675</td><td>100.0</td><td>500.0</td><td>13.5</td></tr>
+</tbody>
+</table></div>
+<p>Hypothetical: in this design protected records travel only on the gateway↔peer link, never on the CAN bus; the <code>protected_record_hypothetical</code> row estimates the cost <em>if</em> they were carried on CAN. Assumption: one protected record = 8 B CAN data + 16 B record header + 16 B AEAD tag = 40 B → 5 CAN 2.0 frames at DLC 8. Segmentation uses 8-byte payload chunks on CAN 2.0 (DLC ≤ 8), padded DLC on CAN FD. Numbers use a 500 kbps bit rate and worst-case bit-stuffing (Davis et al. 2007).</p>
+<h3 id="12c-per-beacon-signature-overhead">§12c Per-beacon Signature Overhead</h3>
+<div style="overflow-x:auto"><table>
+<thead><tr><th>Suite</th><th>Scheme</th><th>Sig bytes</th><th>Bytes/beacon</th><th>Bytes/s per sender</th><th>Verify load (ms/s)</th></tr></thead>
+<tbody>
+<tr><td>pqc</td><td>ML-DSA-65</td><td>3309</td><td>3509</td><td>35090.0</td><td>3.84</td></tr>
+<tr><td>hybrid</td><td>ECDSA-P256 + ML-DSA-65 (dual)</td><td>3373</td><td>3573</td><td>35730.0</td><td>8.47</td></tr>
+</tbody>
+</table></div>
+<p>Estimates for broadcast safety beacons at 10 Hz, 200 B payload, 10 neighbours. Defaults are assumptions; see beacon_cost.py for parameters.</p>
+<hr>
+<h2 id="13-limitations">§13 Limitations</h2>
+<p>The following six limitations are verbatim from the project specification (CLAUDE.md §1):</p>
+<ol>
+<li>The legacy CAN side stays unauthenticated. The gateway protects only the</li>
+</ol>
+<p>gateway↔peer link. A forged frame on the CAN bus is forwarded (protected) by the gateway.</p>
+<ol>
+<li>Results are <strong>relative</strong> comparisons between configurations on a laptop/desktop,</li>
+</ol>
+<p>not real-vehicle timings.</p>
+<ol>
+<li>The handshake is a <strong>custom protocol, not formally verified</strong>. It follows TLS 1.3-style</li>
+</ol>
+<p>patterns but is not TLS.</p>
+<ol>
+<li>Agility covers only algorithms that fit the four interfaces in §4. No claim about future</li>
+</ol>
+<p>algorithms.</p>
+<ol>
+<li>FN-DSA and HQC are included only if the installed library exposes them, and are labelled</li>
+</ol>
+<p>experimental.</p>
+<ol>
+<li>Link emulation is not a wireless channel model.</li>
+</ol>
+<p>Additional limitations:</p>
+<ol>
+<li>All results were obtained on Apple arm64 (M-series); timings may differ significantly</li>
+</ol>
+<p>on x86-64 or embedded hardware.</p>
+<ol>
+<li>Full-rekey timing includes an unresolved event-loop wait in the prototype.</li>
+<li>asyncio scheduling noise is included in end-to-end timings.</li>
+</ol>
+<hr>
+<h2 id="14-figures">§14 Figures</h2>
+<ul>
+<li><strong>micro_keygen.png:</strong> KEM and signature key-generation time by algorithm (median µs, log scale).</li>
+<li><strong>micro_ops.png:</strong> encaps/decaps/sign/verify median µs by algorithm (log scale).</li>
+<li><strong>micro_aead.png:</strong> AES-256-GCM encrypt/decrypt µs vs payload size (8–1024 B).</li>
+<li><strong>latency_cdf.png:</strong> Empirical CDF of per-record latency for C1–C3 (ideal network). C1 median 0.22 ms, C3 median 0.25 ms.</li>
+<li><strong>handshake_bars.png:</strong> Handshake wall time (median ms) per config × network profile. C1/ideal median 2.54 ms, C3/ideal 3.43 ms.</li>
+<li><strong>e2e_overhead.png:</strong> Per-layer overhead bytes per record for C0–C3 (stacked bar).</li>
+<li><strong>contact_window_heat.png:</strong> Heatmap of contact-window / handshake-p95 ratio (C3; range = 100 m; profiles: ideal, delay50, loss5).</li>
+</ul>
+<hr>
+</div>
+</body>
+</html>
