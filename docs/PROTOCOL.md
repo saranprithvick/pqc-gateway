@@ -382,9 +382,9 @@ k_finished  = KDF.expand(rekey_sec_n,     info("finished", n), 32)
 binding ratchet keys to this session and preventing cross-session key confusion.
 
 **Security property**: an observer who learns `rekey_sec_n` cannot recover keys for
-epochs < n (one-way ratchet; forward secrecy for past epochs). However, the ratchet does
-**not** evict an attacker who already holds the current secret; a full rekey (new
-handshake, new KEM ephemeral) is required for that.
+epochs < n (one-way ratchet; forward secrecy for past epochs, but it does not provide
+post-compromise security). An attacker who already holds the current secret can derive all
+future epoch keys; a full rekey (new handshake, new KEM ephemeral) is required to evict them.
 
 **Zeroization**: forward secrecy for past epochs depends on the previous `rekey_sec`
 being deleted after the grace period. Python cannot guarantee in-memory zeroization of
