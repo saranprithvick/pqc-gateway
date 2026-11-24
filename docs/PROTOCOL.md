@@ -43,7 +43,7 @@ message appends the signature as a u16-prefixed field.
 | Field | Size | Notes |
 |---|---|---|
 | version | 1 B | = `0x01` |
-| suite_id | 1 B | 1=classical, 2=pqc, 3=hybrid |
+| suite_id | 1 B | 1=classical, 2=pqc, 3=hybrid; matrix suites use values 10–21 |
 | session_id | 4 B | random (OS CSPRNG, `os.urandom`) |
 | gateway_id | u16 + utf-8 | initiator identity string |
 | peer_id | u16 + utf-8 | target peer identity string |
@@ -183,7 +183,7 @@ HMAC comparison always uses `hmac.compare_digest` to prevent timing side-channel
 gets the cached HELLO_R sent back without re-encapsulation or re-signing. The cache
 lifetime is the `HandshakeResponder` object lifetime (one per handshake attempt in
 `ModernPeer`). After the object is garbage-collected a repeated HELLO_I is treated as a
-fresh handshake (see THREAT_MODEL.md §4 for the DoS caveat).
+fresh handshake (see THREAT_MODEL.md §5.1 for the DoS caveat).
 
 > **Discrepancy with CLAUDE.md §15 item 9**: item 9 says the cache expires "after the
 > handshake timeout". The code ties cache lifetime to the `HandshakeResponder` object
@@ -197,10 +197,13 @@ other duplicate or structurally different FINISHED_I is dropped.
 **REKEY_ACK cache** (§15 item 21): a duplicate REKEY_REQ received during the grace period
 makes the peer resend its cached REKEY_ACK without ratcheting again.
 
-**Handshake retransmit (Gateway):** HELLO_I is retransmitted with exponential backoff:
-`timeout_s = (handshake_timeout_ms / 1000) × 2^attempt`, default 200 ms base,
-maximum 5 retries (attempts 0–4 before error on attempt 5). Total worst-case wait:
-200 + 400 + 800 + 1600 + 3200 = 6200 ms. Source: `gateway.py::_handshake()` line 269.
+**Handshake retransmit (Gateway):** HELLO_I is transmitted up to **6 times total**
+(1 initial + 5 retransmits, `hs_max_retries=5`). After each transmission the gateway
+waits with exponential backoff before retransmitting:
+`timeout_s = (200 ms / 1000) × 2^attempt` for attempts 0–5.
+Timeout sequence: 200, 400, 800, 1600, 3200, 6400 ms.
+Worst-case total wait before failure: 200+400+800+1600+3200+6400 = **12 600 ms ≈ 12.6 s**.
+FINISHED_I uses the same schedule. Source: `gateway.py::_handshake()` line 262–301.
 
 ---
 
@@ -352,7 +355,7 @@ sequenceDiagram
 
     Note over I: switch send to epoch n+1<br/>both accept epoch n for grace period
 
-    Note over I,R: Grace period:<br/>max(2.0 s, 64 new-epoch records)<br/>whichever comes first
+    Note over I,R: Grace period ends at<br/>whichever comes first:<br/>2.0 s or 64 new-epoch records
     Note over I,R: Grace expires → epoch n rejected
 ```
 
@@ -362,24 +365,30 @@ If still unacknowledged after 3 retries, `AlertError` → session closed.
 
 ### 10.2 Ratchet formula
 
+Using the `info(label, epoch)` notation from §6:
+
 ```
 n = current_epoch + 1
 
-rekey_sec_n = KDF.expand(rekey_sec_{n-1}, info("rekey",    sid, th, n), 32)
-k_i2r       = KDF.expand(rekey_sec_n,     info("key i2r",  sid, th, n), key_len)
-k_r2i       = KDF.expand(rekey_sec_n,     info("key r2i",  sid, th, n), key_len)
-salt_i2r    = KDF.expand(rekey_sec_n,     info("salt i2r", sid, th, n), 4)
-salt_r2i    = KDF.expand(rekey_sec_n,     info("salt r2i", sid, th, n), 4)
-k_finished  = KDF.expand(rekey_sec_n,     info("finished", sid, th, n), 32)
+rekey_sec_n = KDF.expand(rekey_sec_{n-1}, info("rekey",    n), 32)
+k_i2r       = KDF.expand(rekey_sec_n,     info("key i2r",  n), key_len)
+k_r2i       = KDF.expand(rekey_sec_n,     info("key r2i",  n), key_len)
+salt_i2r    = KDF.expand(rekey_sec_n,     info("salt i2r", n), 4)
+salt_r2i    = KDF.expand(rekey_sec_n,     info("salt r2i", n), 4)
+k_finished  = KDF.expand(rekey_sec_n,     info("finished", n), 32)
 ```
 
-`th` is always the original handshake transcript hash, binding ratchet keys to this
-session and preventing cross-session key confusion.
+`th` is always the original handshake transcript hash (fixed for the session lifetime),
+binding ratchet keys to this session and preventing cross-session key confusion.
 
 **Security property**: an observer who learns `rekey_sec_n` cannot recover keys for
 epochs < n (one-way ratchet; forward secrecy for past epochs). However, the ratchet does
 **not** evict an attacker who already holds the current secret; a full rekey (new
 handshake, new KEM ephemeral) is required for that.
+
+**Zeroization**: forward secrecy for past epochs depends on the previous `rekey_sec`
+being deleted after the grace period. Python cannot guarantee in-memory zeroization of
+overwritten values; this is a documented limitation (see LIMITATIONS.md).
 
 Source: `rekey.py::derive_rekey_epoch()`.
 
@@ -396,9 +405,14 @@ FINISHED_R), new CAN traffic is sent on the new session. The old session remains
 accepted for the grace period (2 s or 64 records on the new session, whichever comes
 first), then closes.
 
-**Event-loop note**: the full-rekey asyncio task starts on the next event-loop iteration
-after `request_full_rekey()` is called; the measured full-rekey time includes this
-unresolved scheduling wait. Source: `gateway.py::_do_full_rekey()`.
+**Measured timing note**: measured full-rekey time includes event-loop scheduling
+overhead; no specific cause has been isolated.
+Source: `gateway.py::_do_full_rekey()`.
+
+**Failure behaviour**: the full-rekey handshake uses the same timeout and retry schedule
+as the initial handshake (up to 3 attempts, configurable via
+`full_rekey_max_attempts=3`). The old session continues carrying traffic during all
+attempts. If all attempts fail, `AlertError` is raised and the session closes.
 
 **Trigger conditions** (all configurable):
 - Epoch ≥ 254 (automatic, gateway run loop)
@@ -465,9 +479,9 @@ All values are from the actual code (not from CLAUDE.md). Configurable via
 Maximum payload per fragment = `mtu_bytes − 8`. With the default 1500 B MTU,
 each fragment carries up to 1492 B of link-level payload.
 
-Reassembly is stop-and-wait: a lost fragment loses the entire message, requiring a
-retransmit of the whole handshake or rekey message. At 5% loss, retransmit counts and
-latency increase substantially; this is an expected finding, not a bug (T8, results in
-`handshake.csv` and `latency.csv`).
+Reassembly is all-or-nothing: a lost fragment loses the entire message. Only handshake
+and rekey messages are retransmitted on loss; DATA records are **not** retransmitted —
+losses appear in the delivery ratio. At 5% loss, retransmit counts and handshake latency
+increase substantially; this is an expected finding, not a bug.
 
 Source: `fragment.py`.

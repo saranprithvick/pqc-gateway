@@ -43,8 +43,8 @@ Records encrypted traffic today; decrypts it once a cryptographically relevant q
 computer (CRQC) becomes available. X25519 (C1) is vulnerable to this attack; ML-KEM
 (C2, C3) provides post-quantum confidentiality by design. Configuration C3 (hybrid) is
 resistant to HNDL **provided** the ML-KEM component remains secure; the classical
-X25519 component remains as a defence against implementation weaknesses in the PQC
-library.
+X25519 component remains as a hedge against both implementation weaknesses in the
+PQC library and unexpected cryptanalytic advances against ML-KEM.
 
 ---
 
@@ -54,7 +54,7 @@ library.
 |---|---|
 | Identity keys are pre-provisioned trust anchors (no PKI, no revocation) | A compromised identity key allows impersonation until manually replaced |
 | OS CSPRNG (`os.urandom`) is trustworthy | Session IDs, nonces, and ephemeral key material become predictable |
-| liboqs and `cryptography` library implementations are correct | Implementation bugs could bypass the security goals; this is covered by limitation 3 (custom, unverified) |
+| liboqs and `cryptography` library implementations are correct | Implementation bugs could bypass security goals. Known prior issue: GHSA-w696-4vrr-x6x3 (liboqs-python < 0.16.0.2 silently zero-padded short inputs); fixed in 0.16.0.2 and mitigated in this project's wrappers, which validate all input lengths before passing to liboqs. Library correctness is otherwise outside this prototype's scope (limitation 3). |
 | Both endpoints are inside their respective trust boundaries | A compromised gateway endpoint breaks confidentiality and integrity |
 | The system clock is not under attacker control | Only affects grace-period expiry; replays outside the window are still rejected by the counter |
 
@@ -103,8 +103,8 @@ AEAD implementation. Timing side-channels on those operations are out of scope.
 ### 5.3 Unauthenticated type prefix
 
 The 1-byte link message prefix (`0x01`–`0x10`) is not covered by any signature or AEAD.
-An attacker who alters it can misroute a message; the receiver then rejects it at the
-parse or AEAD step. The session_id is in the authenticated record header (AEAD AAD), so
+Altering it can cause a message to be dropped — no worse than the attacker dropping it;
+the receiver rejects it at the parse or AEAD step. The session_id is in the authenticated record header (AEAD AAD), so
 altering the prefix cannot cause a record to be accepted under a different session. This
 is not a security weakness but a documented design choice.
 
@@ -113,7 +113,7 @@ is not a security weakness but a documented design choice.
 The gateway does not authenticate CAN-bus senders. A forged CAN frame injected onto the
 legacy bus will be forwarded (protected) to the peer. This is a known non-prevention
 (limitation 1) and is asserted by security test T12. Addressing it would require
-in-vehicle CAN authentication (e.g. SecOC / ISO 17987-7), which is future work.
+in-vehicle CAN authentication (e.g. AUTOSAR SecOC), which is future work.
 
 ### 5.5 Formal verification
 
@@ -131,7 +131,10 @@ certificate chain, or revocation mechanism. Key compromise requires manual repla
 
 | Risk | Detail |
 |---|---|
-| **Light rekey does not evict an attacker** | An attacker who already holds the current session secret (`rekey_sec_n`) can derive epoch n+1 keys from the same secret. Only a full rekey (new handshake, new ephemeral KEM) achieves forward secrecy against an attacker who holds the live secret. |
+| **Light rekey: forward secrecy only, not post-compromise security** | Light rekey (ratchet) provides forward secrecy for past epochs: an observer who later learns the current `rekey_sec_n` cannot decrypt records from epochs < n. However, it does **not** provide post-compromise security: an attacker who already holds `rekey_sec_n` can derive all future epoch keys. Only a full rekey (new handshake, new ephemeral KEM) achieves post-compromise security. |
+| **Light-rekey forward secrecy depends on secret deletion** | Forward secrecy for past epochs requires that the previous `rekey_sec` is deleted after the grace period. Python cannot guarantee in-memory zeroization of overwritten values (see LIMITATIONS.md); if the GC does not reclaim the old object before it is paged to disk, past epoch keys may be recoverable. |
+| **No DoS protection** | A link attacker can replay captured HELLO_I messages to force the responder to perform KEM encapsulation and signing. Rate limiting is out of scope (§5.1). |
+| **C1 authentication is not quantum-resistant** | HNDL threatens the **confidentiality** of C1 traffic (X25519). The ECDSA-P256 signatures used in the C1 handshake are also vulnerable to a live quantum adversary breaking authentication. C2 and C3 use ML-DSA-65 for quantum-resistant authentication. |
 | **Identity-key compromise allows impersonation** | There is no revocation path. A compromised long-term signing key must be replaced out-of-band on both endpoints. |
 | **HNDL threatens C1 confidentiality** | Traffic encrypted under C1 (X25519 only) is vulnerable to harvest-now-decrypt-later by a future CRQC. C2 (ML-KEM-768) and C3 (hybrid X25519+ML-KEM-768) are designed to resist this attack. |
 | **CAN-bus trust boundary** | The gateway trusts every frame it receives from the CAN bus. Physical access to the CAN bus is an out-of-band concern. |
