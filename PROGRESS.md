@@ -13,7 +13,7 @@
 | M5b | DONE | 239 tests pass. Branch m5b-rekey-link (3 commits: m5b-01-proto, m5b-02-stack, m5b-03-tests). Merge to main pending approval. |
 | M6 | DONE | 333 non-slow tests pass (118 security + 13 agility + 202 unit/smoke). Branch m6-security-agility. |
 | M7 | DONE | Benchmark harness complete. 795 tests pass. Branch m7-benchmarks. All tables and figures in results/. |
-| M8 | Not started | |
+| M8 | DONE | README.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md, docs/LIMITATIONS.md updated. Branch m8-docs. |
 
 ## Decisions made
 
@@ -53,24 +53,47 @@ Installed to `$PWD/.oqs/lib/liboqs.dylib`. The Makefile exports `OQS_INSTALL_PAT
 
 ## Next step
 
-**Current state (2026-11-20): Phase 1 code changes complete — awaiting `make test` + commit, then Phase 2 bench rerun.**
+**Current state (2026-11-24): M8 documentation complete on branch m8-docs. Awaiting merge approval.**
 
-Files modified in m7-fixes-wip (Phase 1):
-- `src/pqcgw/bench/e2e.py` — removed rekey interval sweep; added frags_i2r/r2i_median to handshake summary; added augment_overhead_with_hs_amortised(); added --aggregate-only CLI flag
-- `scripts/run_matrix.py` — 1-line fix in _find_test_result: normalize `/` → `-` in XML test name before substring search
-- `scripts/make_security_table.py` — T7 label fix; _config_from_suite returns None for unknown; _build_table post-processes n/a cells; liboqs_python_version + experimental metadata; security_c0_c3.csv output
-- `scripts/make_plots.py` — guard plot_rekey_sweep with existence check
-- `scripts/make_brief.py` — NEW: generates docs/RESULTS_BRIEF.md from results/tables/ only
-- `Makefile` — added --aggregate-only O step and make_brief.py to bench target
+Files created/updated in m8-docs:
+- `README.md` — NEW: scope, architecture, setup, test/bench commands, limitations
+- `docs/PROTOCOL.md` — NEW: full wire protocol spec from code (messages, key schedule, record, replay, rekey, Mermaid diagrams)
+- `docs/THREAT_MODEL.md` — NEW: assets, adversaries, T1–T13 table, residual risks
+- `docs/LIMITATIONS.md` — UPDATED: added 7 new measurement/implementation limitations
+- `PROGRESS.md` — UPDATED: M8 done, discrepancies, future work
 
-**Exact next steps:**
-1. Run `make test` and verify all tests still pass (expected: ≥795).
-2. Commit Phase 1 code changes on m7-fixes-wip.
-3. Phase 2: `rm -rf results/raw/*` → `make bench` → verify all CSV metadata share same git_commit → commit results.
-4. Do NOT push or merge until user says so.
-5. After results freeze: start M8 — README, docs/PROTOCOL.md, THREAT_MODEL.md, LIMITATIONS.md, results summary tables.
+**CLAUDE.md §14 Commands** updated with accurate make targets.
 
-## Deferred to future work
+## M8 discrepancies (code vs CLAUDE.md)
+
+| # | CLAUDE.md text | Code behaviour | Decision |
+|---|---|---|---|
+| D1 | §6: "exponential backoff, max 5 tries" for handshake retransmit | Code confirms exponential backoff: `timeout_s = (200ms/1000) × 2^attempt`, max 5 retries. **No discrepancy.** | — |
+| D2 | §5.3: label notation `"key i2r" \|\| suite_id \|\| th` | Code uses `u8(len(label)) \|\| label_ascii \|\| u8(suite_id) \|\| th \|\| u8(epoch)` per §15 item 8. §15 supersedes §5.3. | Documented from code |
+| D3 | §5.2: FINISHED_I = `HMAC(k_finished, H(HELLO_I \|\| HELLO_R))` | Code: `HMAC(k_finished, "I" \|\| th)` per §15 item 14 (supersedes §5.2). | Documented from code |
+| D4 | §15 item 9: HELLO_R cache expires "after the handshake timeout" | Code: cache lifetime equals the `HandshakeResponder` object lifetime (no explicit timer). After the object is GC'd a repeated HELLO_I is treated as a new handshake. | Listed as discrepancy in PROTOCOL.md §5 |
+
+## Future work
+
+The following are explicitly out of scope for this prototype and listed here as future
+directions for a production system:
+
+- **CAN-side authentication** (e.g. SecOC / ISO 17987-7) to address limitation 1 (T12).
+- **Standardised composite signatures** (IETF draft-ounsworth-pq-composite-sigs or
+  similar) to replace the current non-standard dual-signature scheme.
+- **Rekey interval sweep** — deferred from M7; sweep C3/ideal over 8 intervals from
+  10–5000 records, 1000 frames each, to characterise overhead vs security trade-off.
+- **Full-rekey timing fix** — the unresolved event-loop wait in `_do_full_rekey` inflates
+  measured full-rekey latency; isolation and reduction are future work.
+- **SUMO / Veins / OMNeT++ integration** — real mobility and wireless channel modelling.
+- **Raspberry Pi / embedded hardware** — on-device performance evaluation.
+- **Formal protocol verification** — ProVerif or Tamarin modelling of the handshake.
+- **PKI / certificate chains / revocation** — currently trust anchors are pre-provisioned.
+- **Frame aggregation** — batch multiple CAN frames per record (config flag
+  `aggregation_window_ms` / `max_frames_per_record`) to reduce per-record overhead.
+- **Broadcast safety beacons as an implemented feature** — currently analysis-script only.
+
+## Deferred to future work (earlier)
 
 **Rekey interval sweep (removed M7, 2026-11-20):** `_run_rekey_interval_sweep` and
 `rekey_sweep.csv` removed from `e2e.py` and from the bench Makefile target. The sweep

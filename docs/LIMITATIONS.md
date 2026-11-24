@@ -94,3 +94,49 @@ C0 (passthrough) latency via `PassthroughPath` is not measured in the M7
 benchmark harness because `PassthroughPath` does not expose the same
 `LatencyTracker` hooks as `Gateway`/`ModernPeer`.  Overhead for C0 is
 computed analytically (baseline + fragment header bytes).
+
+### Python cannot guarantee key zeroization
+
+The key schedule and rekey ratchet overwrite the previous `rekey_sec` by
+returning a new `SessionKeys` object whose `rekey_sec0` field holds the new
+secret.  Python's garbage collector controls when the old object's memory is
+reclaimed and may not zero it.  This is a documented limitation of using Python
+for security-critical code; it does not affect the correctness of the protocol.
+
+### Full-rekey timing includes an unresolved event-loop wait
+
+The full-rekey asyncio task starts on the next event-loop iteration after
+`request_full_rekey()` is called.  Measured full-rekey wall time therefore
+includes at least one event-loop scheduling delay (typically tens of µs on a
+desktop OS) in addition to the new handshake's crypto and link time.
+
+### Rekey triggers checked on each run-loop iteration (~10 ms)
+
+The Gateway run loop uses `asyncio.wait_for` with a ~10 ms timeout to poll for
+CAN frames.  Automatic rekey triggers (elapsed time, record count, byte count)
+are checked once per loop iteration, so the actual trigger may fire up to ~10 ms
+after the configured threshold is crossed.
+
+### Constant ~6–8 ms overhead in handshake wall time on delay profiles
+
+Handshake timing on delay profiles shows a constant offset of approximately
+6–8 ms above the expected value (≈ 4 × delay_ms + ideal_time).  This is
+consistent across C1–C3 and all delay settings.  The source has not been
+isolated; the offset is likely a combination of asyncio event-loop scheduling,
+python-can virtual bus overhead, and task startup time.  It does not affect the
+relative comparison between configurations.
+
+### Apple arm64 only
+
+All benchmark numbers were collected on Apple arm64 (M-series, macOS 25.6.0,
+Python 3.13.2, liboqs 0.16.0).  Absolute values on other hardware will differ.
+See limitation 2 (relative timing results).
+
+### Analytical scripts are estimates
+
+The three analytical scripts (`bus_time.py`, `contact_window.py`,
+`beacon_cost.py`) produce illustrative estimates using configurable parameters
+and measured timing from the benchmark runs.  They are labelled "Analytical
+estimate, not a simulation." in their output headers.  The contact-window and
+beacon-cost estimates in particular depend on assumed vehicle speeds, ranges,
+and beacon rates that are not derived from any standard or measurement.
