@@ -331,10 +331,15 @@ pqc-gateway/
 - No SUMO/Veins, no Raspberry Pi, no PKI.
 
 ## 14. Commands (maintained by Claude Code; fill in during M0, keep accurate)
-- Setup: `make setup`  (requires liboqs already built into `.oqs/` via cmake; creates `.venv`, installs all deps with `OQS_INSTALL_PATH=$PWD/.oqs`, writes `requirements.lock`; see PROGRESS.md OI-3 for the cmake command)
-- Run tests: `make test`
+- Setup: `make setup`  (requires liboqs 0.16.0 built into `.oqs/` via cmake; see README.md for the cmake steps; creates `.venv`, installs all deps with `OQS_INSTALL_PATH=$PWD/.oqs`, writes `requirements.lock`)
+- Run all tests: `make test`
+- Run smoke tests only: `make smoke`
 - Run security tests only: `.venv/bin/pytest tests/security/ -v`
-- Run benchmarks / agility matrix: `python scripts/run_matrix.py` *(completed in M7)*
+- Run slow tests only: `.venv/bin/pytest -m slow`
+- Run benchmarks (all): `make bench`  (~2.5 hours on Apple arm64; outputs in `results/`)
+- Run agility matrix only: `.venv/bin/python scripts/run_matrix.py`
+- Generate security table: `.venv/bin/python scripts/make_security_table.py`
+- Generate results brief: `.venv/bin/python scripts/make_brief.py`
 
 ## 15. Resolved decisions (from the M0 review; these take precedence over earlier sections where they conflict)
 1. **Where code runs:** on the student's own machine via terminal Claude Code. All benchmark and result files must come from there, never from a cloud sandbox.
